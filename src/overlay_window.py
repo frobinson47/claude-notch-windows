@@ -36,7 +36,8 @@ class ActivityIndicator(QWidget):
         self.animation_timer = QTimer()
         self.animation_timer.timeout.connect(self._animate_step)
 
-    def set_pattern(self, pattern_name: str, color_rgb: tuple, config: dict):
+    def set_pattern(self, pattern_name: str, color_rgb: tuple, config: dict,
+                    speed_multiplier: float = 1.0, animations_enabled: bool = True):
         """
         Set the animation pattern.
 
@@ -44,13 +45,24 @@ class ActivityIndicator(QWidget):
             pattern_name: Name of pattern (scan, cogitate, etc.)
             color_rgb: RGB tuple for color
             config: Pattern configuration dict
+            speed_multiplier: Speed multiplier for animation interval
+            animations_enabled: Whether animations are enabled
         """
         self.color = QColor(*color_rgb)
         self.pattern_config = config
         self.sequence_index = 0
 
-        # Start animation
-        interval = int(config.get('interval', 0.1) * 1000)  # Convert to ms
+        if not animations_enabled:
+            # Show static first frame
+            self.animation_timer.stop()
+            sequence = config.get('sequence', [[]])
+            self.lit_squares = sequence[0] if sequence else []
+            self.update()
+            return
+
+        # Start animation with speed multiplier applied
+        base_interval = config.get('interval', 0.1) * 1000  # Convert to ms
+        interval = max(10, int(base_interval / speed_multiplier))
         if interval > 0:
             self.animation_timer.start(interval)
         else:
@@ -141,11 +153,12 @@ class SessionCard(QWidget):
     Shows project name, tool status, and activity indicator.
     """
 
-    def __init__(self, session: SessionState, config, parent=None):
+    def __init__(self, session: SessionState, config, user_settings=None, parent=None):
         super().__init__(parent)
 
         self.session = session
         self.config = config
+        self.user_settings = user_settings
 
         # Setup UI
         self._setup_ui()
@@ -199,16 +212,28 @@ class SessionCard(QWidget):
 
     def update_animation(self):
         """Update animation based on current session state."""
+        speed = 1.0
+        enabled = True
+        if self.user_settings:
+            speed = self.user_settings.get("animation_speed_multiplier")
+            enabled = self.user_settings.get("animations_enabled")
+
         if self.session.active_tool:
             tool = self.session.active_tool
             color_rgb = self.config.get_color_rgb(tool.color)
             pattern_config = self.config.get_pattern_config(tool.pattern)
-            self.activity_indicator.set_pattern(tool.pattern, color_rgb, pattern_config)
+            self.activity_indicator.set_pattern(
+                tool.pattern, color_rgb, pattern_config,
+                speed_multiplier=speed, animations_enabled=enabled,
+            )
         else:
             # Idle - dormant pattern
             color_rgb = self.config.get_color_rgb('slate')
             pattern_config = self.config.get_pattern_config('dormant')
-            self.activity_indicator.set_pattern('dormant', color_rgb, pattern_config)
+            self.activity_indicator.set_pattern(
+                'dormant', color_rgb, pattern_config,
+                speed_multiplier=speed, animations_enabled=enabled,
+            )
 
     def update_display(self):
         """Update display labels."""
@@ -224,11 +249,12 @@ class ClaudeNotchOverlay(QWidget):
     Transparent, frameless window showing Claude activity.
     """
 
-    def __init__(self, state_manager: StateManager, parent=None):
+    def __init__(self, state_manager: StateManager, user_settings=None, parent=None):
         super().__init__(parent)
 
         self.state_manager = state_manager
         self.config = state_manager.config
+        self.user_settings = user_settings
         self.session_cards = {}  # session_id -> SessionCard
 
         # Window flags for overlay
@@ -250,6 +276,10 @@ class ClaudeNotchOverlay(QWidget):
         self.state_manager.activity_changed.connect(self._on_activity_changed)
         self.state_manager.session_updated.connect(self._on_session_updated)
 
+        # Connect user settings
+        if self.user_settings:
+            self.user_settings.settings_changed.connect(self._on_setting_changed)
+
         # Position window
         self._position_window()
 
@@ -270,16 +300,29 @@ class ClaudeNotchOverlay(QWidget):
         self.setMinimumSize(400, 100)
 
     def _position_window(self):
-        """Position window at top-right of screen."""
+        """Position window at the configured screen corner."""
         from PyQt5.QtWidgets import QDesktopWidget
 
         desktop = QDesktopWidget()
         screen_rect = desktop.availableGeometry()
-
-        # Position at top-right with some padding
         padding = 20
-        x = screen_rect.right() - self.width() - padding
-        y = screen_rect.top() + padding
+
+        position = "top-right"
+        if self.user_settings:
+            position = self.user_settings.get("screen_position")
+
+        if position == "top-left":
+            x = screen_rect.left() + padding
+            y = screen_rect.top() + padding
+        elif position == "bottom-right":
+            x = screen_rect.right() - self.width() - padding
+            y = screen_rect.bottom() - self.height() - padding
+        elif position == "bottom-left":
+            x = screen_rect.left() + padding
+            y = screen_rect.bottom() - self.height() - padding
+        else:  # top-right (default)
+            x = screen_rect.right() - self.width() - padding
+            y = screen_rect.top() + padding
 
         self.move(x, y)
 
@@ -312,17 +355,30 @@ class ClaudeNotchOverlay(QWidget):
                 card.update_display()
             else:
                 # Create new card
-                card = SessionCard(session, self.config)
+                card = SessionCard(session, self.config, user_settings=self.user_settings)
                 self.session_cards[session.session_id] = card
                 self.layout.addWidget(card)
 
-        # Show/hide window based on activity
-        if sessions and not self.state_manager.is_idle:
-            if not self.isVisible():
-                self.show()
+        # Show/hide window based on activity and auto_hide setting
+        auto_hide = True
+        if self.user_settings:
+            auto_hide = self.user_settings.get("auto_hide")
+
+        if auto_hide:
+            if sessions and not self.state_manager.is_idle:
+                if not self.isVisible():
+                    self.show()
+            else:
+                if self.isVisible():
+                    self.hide()
         else:
-            if self.isVisible():
-                self.hide()
+            # Always visible when auto_hide is off (as long as there are sessions)
+            if sessions:
+                if not self.isVisible():
+                    self.show()
+            else:
+                if self.isVisible():
+                    self.hide()
 
         # Adjust window size
         self.adjustSize()
@@ -340,13 +396,28 @@ class ClaudeNotchOverlay(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw rounded rectangle background
-        bg_color = QColor(20, 20, 20, 220)  # Dark semi-transparent
+        opacity = 220
+        if self.user_settings:
+            opacity = self.user_settings.get("background_opacity")
+        bg_color = QColor(20, 20, 20, opacity)
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.NoPen)
 
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height(), 15, 15)
         painter.drawPath(path)
+
+    def _on_setting_changed(self, key: str):
+        """React to user setting changes."""
+        if key == "screen_position":
+            self._position_window()
+        elif key == "background_opacity":
+            self.update()  # triggers paintEvent
+        elif key == "auto_hide":
+            self._update_sessions()
+        elif key in ("animation_speed_multiplier", "animations_enabled"):
+            for card in self.session_cards.values():
+                card.update_animation()
 
     def mousePressEvent(self, event):
         """Handle mouse press for dragging."""

@@ -16,13 +16,15 @@ logger = logging.getLogger(__name__)
 class ClaudeNotchTray(QSystemTrayIcon):
     """System tray icon that shows Claude Code activity."""
 
-    def __init__(self, state_manager: StateManager, parent=None):
+    def __init__(self, state_manager: StateManager, user_settings=None, parent=None):
         """Initialize tray icon."""
         super().__init__(parent)
 
         self.state_manager = state_manager
         self.config = state_manager.config
+        self.user_settings = user_settings
         self.overlay_window = None
+        self._settings_dialog = None
 
         # Create initial icon
         self._update_icon()
@@ -33,6 +35,10 @@ class ClaudeNotchTray(QSystemTrayIcon):
         # Connect to state manager signals
         self.state_manager.activity_changed.connect(self._on_activity_changed)
         self.state_manager.session_updated.connect(self._on_session_updated)
+
+        # Connect user settings
+        if self.user_settings:
+            self.user_settings.settings_changed.connect(self._on_setting_changed)
 
         # Set tooltip
         self.setToolTip("Claude Code - Idle")
@@ -127,6 +133,10 @@ class ClaudeNotchTray(QSystemTrayIcon):
         """Update tray icon based on current activity."""
         session = self.state_manager.get_current_session()
 
+        show_letter = True
+        if self.user_settings:
+            show_letter = self.user_settings.get("show_category_letter")
+
         if not session or not session.active_tool:
             # Idle - gray
             color = self.config.get_color_rgb('slate')
@@ -137,8 +147,8 @@ class ClaudeNotchTray(QSystemTrayIcon):
             tool = session.active_tool
             color = self.config.get_color_rgb(tool.color)
 
-            # Use first letter of category as text
-            text = tool.category[0].upper() if tool.category else ""
+            # Use first letter of category as text (if enabled)
+            text = (tool.category[0].upper() if tool.category else "") if show_letter else ""
 
             # Build tooltip
             tooltip = f"Claude Code - {tool.display_name}"
@@ -160,6 +170,11 @@ class ClaudeNotchTray(QSystemTrayIcon):
         """Handle session update signal."""
         self._update_icon()
 
+    def _on_setting_changed(self, key: str):
+        """React to user setting changes."""
+        if key == "show_category_letter":
+            self._update_icon()
+
     def _periodic_update(self):
         """Periodic update (cleanup, etc.)."""
         # Cleanup stale sessions
@@ -178,7 +193,7 @@ class ClaudeNotchTray(QSystemTrayIcon):
         if self.overlay_window is None:
             # Create overlay window (lazy load)
             from overlay_window import ClaudeNotchOverlay
-            self.overlay_window = ClaudeNotchOverlay(self.state_manager)
+            self.overlay_window = ClaudeNotchOverlay(self.state_manager, user_settings=self.user_settings)
 
         if self.overlay_window.isVisible():
             self.overlay_window.hide()
@@ -189,13 +204,14 @@ class ClaudeNotchTray(QSystemTrayIcon):
 
     def _show_settings(self):
         """Show settings dialog."""
-        # TODO: Implement settings dialog
-        self.showMessage(
-            "Settings",
-            "Settings dialog coming soon!",
-            QSystemTrayIcon.Information,
-            2000
-        )
+        if self._settings_dialog is None:
+            from settings_dialog import SettingsDialog
+            self._settings_dialog = SettingsDialog(self.user_settings)
+        if self._settings_dialog.isVisible():
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+        else:
+            self._settings_dialog.show()
 
     def _run_setup(self):
         """Run hook setup."""

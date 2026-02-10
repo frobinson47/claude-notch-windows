@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from http_server import ClaudeCodeServer
 from state_manager import StateManager, NotchConfig
+from user_settings import UserSettings
 from tray_icon import ClaudeNotchTray
 from overlay_window import ClaudeNotchOverlay
 
@@ -59,30 +60,35 @@ class ClaudeNotchApp:
             self.logger.error(f"Failed to load configuration: {e}")
             sys.exit(1)
 
+        # Load user settings
+        self.user_settings = UserSettings()
+        self.logger.info("User settings loaded")
+
         # Create state manager
-        self.state_manager = StateManager(self.config)
+        self.state_manager = StateManager(self.config, user_settings=self.user_settings)
         self.logger.info("State manager created")
 
-        # Create HTTP server
+        # Create HTTP server (port from user settings)
+        server_port = self.user_settings.get("server_port")
         self.server = ClaudeCodeServer(
-            port=27182,
+            port=server_port,
             event_callback=self.state_manager.handle_event
         )
 
         # Start server
         try:
             self.server.start()
-            self.logger.info("HTTP server started on port 27182")
+            self.logger.info(f"HTTP server started on port {server_port}")
         except Exception as e:
             self.logger.error(f"Failed to start server: {e}")
             sys.exit(1)
 
         # Create overlay window (but don't show yet)
-        self.overlay = ClaudeNotchOverlay(self.state_manager)
+        self.overlay = ClaudeNotchOverlay(self.state_manager, user_settings=self.user_settings)
         self.logger.info("Overlay window created")
 
         # Create system tray icon
-        self.tray = ClaudeNotchTray(self.state_manager)
+        self.tray = ClaudeNotchTray(self.state_manager, user_settings=self.user_settings)
         self.tray.set_overlay_window(self.overlay)
         self.logger.info("System tray icon created")
 

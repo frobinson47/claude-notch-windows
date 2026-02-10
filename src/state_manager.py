@@ -5,6 +5,7 @@ Manages session state, active tools, token usage, and UI updates.
 
 import json
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -75,8 +76,12 @@ class SessionState:
 
     @property
     def is_stale(self) -> bool:
-        """Check if session is stale (no activity for >60s)."""
+        """Check if session is stale (no activity for >60s). Use is_stale_at for dynamic timeout."""
         return time.time() - self.last_activity > 60
+
+    def is_stale_at(self, timeout: int = 60) -> bool:
+        """Check if session is stale with a configurable timeout."""
+        return time.time() - self.last_activity > timeout
 
 
 class NotchConfig:
@@ -85,8 +90,9 @@ class NotchConfig:
     def __init__(self, config_path: Optional[Path] = None):
         """Load configuration from JSON file."""
         if config_path is None:
-            # Default to config/notch-config.json relative to this file
-            config_path = Path(__file__).parent.parent / "config" / "notch-config.json"
+            # Support PyInstaller bundled path
+            base = getattr(sys, '_MEIPASS', Path(__file__).parent.parent)
+            config_path = Path(base) / "config" / "notch-config.json"
 
         with open(config_path, 'r') as f:
             self.config = json.load(f)
@@ -147,11 +153,12 @@ class StateManager(QObject):
     tool_ended = pyqtSignal(str, str)  # session_id, tool_name
     activity_changed = pyqtSignal()  # General activity change
 
-    def __init__(self, config: Optional[NotchConfig] = None):
+    def __init__(self, config: Optional[NotchConfig] = None, user_settings=None):
         """Initialize state manager."""
         super().__init__()
 
         self.config = config or NotchConfig()
+        self.user_settings = user_settings
         self.sessions: Dict[str, SessionState] = {}
         self.pinned_paths: Set[str] = set()
         self.active_session_id: Optional[str] = None
@@ -354,27 +361,35 @@ class StateManager(QObject):
 
     def get_display_sessions(self) -> List[SessionState]:
         """Get sessions to display (active or pinned)."""
+        activity_timeout = self._get_activity_timeout()
         display = []
 
         for session in self.sessions.values():
             # Show if active, has active tool, or is pinned
             if session.is_active or session.active_tool or session.project_path in self.pinned_paths:
-                if not session.is_stale:
+                if not session.is_stale_at(activity_timeout):
                     display.append(session)
 
         return sorted(display, key=lambda s: s.last_activity, reverse=True)
 
     def cleanup_stale_sessions(self):
         """Remove stale sessions."""
+        activity_timeout = self._get_activity_timeout()
         to_remove = []
 
         for session_id, session in self.sessions.items():
-            if session.is_stale and not session.is_active and session.project_path not in self.pinned_paths:
+            if session.is_stale_at(activity_timeout) and not session.is_active and session.project_path not in self.pinned_paths:
                 to_remove.append(session_id)
 
         for session_id in to_remove:
             logger.debug(f"Removing stale session: {session_id}")
             del self.sessions[session_id]
+
+    def _get_activity_timeout(self) -> int:
+        """Get activity timeout from user settings or config defaults."""
+        if self.user_settings:
+            return self.user_settings.get("activity_timeout")
+        return self.config.defaults.get('activityTimeout', 60)
 
     @property
     def has_activity(self) -> bool:
@@ -384,5 +399,8 @@ class StateManager(QObject):
     @property
     def is_idle(self) -> bool:
         """Check if system has been idle."""
-        idle_timeout = self.config.defaults.get('idleTimeout', 15)
+        if self.user_settings:
+            idle_timeout = self.user_settings.get("idle_timeout")
+        else:
+            idle_timeout = self.config.defaults.get('idleTimeout', 15)
         return time.time() - self.last_activity_time > idle_timeout
