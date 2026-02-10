@@ -1,0 +1,388 @@
+"""
+State management for Claude Code sessions and tool tracking.
+Manages session state, active tools, token usage, and UI updates.
+"""
+
+import json
+import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional, List, Set
+from PyQt5.QtCore import QObject, pyqtSignal
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ActiveTool:
+    """Represents an active tool being used by Claude."""
+    tool_name: str
+    started_at: float = field(default_factory=time.time)
+    description: str = ""
+    category: str = "think"
+    display_name: str = "Working"
+    color: str = "orange"
+    pattern: str = "cogitate"
+
+
+@dataclass
+class TokenStats:
+    """Token usage statistics."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def total_cost_tokens(self) -> int:
+        """Total tokens for cost calculation (includes cache creation)."""
+        return self.total_tokens + self.cache_creation_tokens
+
+
+@dataclass
+class SessionState:
+    """Represents a Claude Code session."""
+    session_id: str
+    project_path: str
+    project_name: str
+    start_time: float = field(default_factory=time.time)
+    last_activity: float = field(default_factory=time.time)
+    active_tool: Optional[ActiveTool] = None
+    recent_tools: List[ActiveTool] = field(default_factory=list)
+    is_active: bool = True
+    permission_mode: str = "normal"
+    token_stats: TokenStats = field(default_factory=TokenStats)
+    context_percent: float = 0.0
+    context_tokens: int = 0
+
+    @property
+    def display_name(self) -> str:
+        """Get display name for session."""
+        return self.project_name or Path(self.project_path).name or "Unknown"
+
+    @property
+    def status_text(self) -> str:
+        """Get status text for session."""
+        if self.active_tool:
+            return f"{self.active_tool.display_name} - {self.display_name}"
+        return f"Idle - {self.display_name}"
+
+    @property
+    def is_stale(self) -> bool:
+        """Check if session is stale (no activity for >60s)."""
+        return time.time() - self.last_activity > 60
+
+
+class NotchConfig:
+    """Loads and manages notch-config.json configuration."""
+
+    def __init__(self, config_path: Optional[Path] = None):
+        """Load configuration from JSON file."""
+        if config_path is None:
+            # Default to config/notch-config.json relative to this file
+            config_path = Path(__file__).parent.parent / "config" / "notch-config.json"
+
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+
+        self.categories = self.config.get('categories', {})
+        self.tools = self.config.get('tools', {})
+        self.states = self.config.get('states', {})
+        self.patterns = self.config.get('patterns', {})
+        self.colors = self.config.get('colors', {})
+        self.defaults = self.config.get('defaults', {})
+        self.attention_levels = self.config.get('attention_levels', {})
+
+    def get_tool_info(self, tool_name: str) -> Dict:
+        """Get tool configuration with category info merged."""
+        tool_name_lower = tool_name.lower()
+
+        # Get tool config (or use default)
+        tool_config = self.tools.get(tool_name_lower, self.defaults.get('unknownTool', {}))
+
+        # Get category name
+        category_name = tool_config.get('category', 'think')
+
+        # Get category config
+        category_config = self.categories.get(category_name, {})
+
+        # Merge tool and category config
+        return {
+            'tool_name': tool_name,
+            'display_name': tool_config.get('displayName', tool_name.title()),
+            'category': category_name,
+            'color': category_config.get('color', 'orange'),
+            'pattern': category_config.get('pattern', 'cogitate'),
+            'intensity': category_config.get('intensity', 2),
+            'attention': category_config.get('attention', 'ambient'),
+            'description': category_config.get('description', ''),
+        }
+
+    def get_color_rgb(self, color_name: str) -> tuple:
+        """Get RGB tuple for a color name."""
+        color_config = self.colors.get(color_name, self.colors.get('orange', {}))
+        return tuple(color_config.get('rgb', [249, 115, 22]))
+
+    def get_pattern_config(self, pattern_name: str) -> Dict:
+        """Get pattern configuration."""
+        return self.patterns.get(pattern_name, self.patterns.get('cogitate', {}))
+
+
+class StateManager(QObject):
+    """
+    Central state manager for Claude Code activity.
+    Emits Qt signals for UI updates.
+    """
+
+    # Qt signals for UI updates
+    session_updated = pyqtSignal(str)  # session_id
+    session_ended = pyqtSignal(str)  # session_id
+    tool_started = pyqtSignal(str, str)  # session_id, tool_name
+    tool_ended = pyqtSignal(str, str)  # session_id, tool_name
+    activity_changed = pyqtSignal()  # General activity change
+
+    def __init__(self, config: Optional[NotchConfig] = None):
+        """Initialize state manager."""
+        super().__init__()
+
+        self.config = config or NotchConfig()
+        self.sessions: Dict[str, SessionState] = {}
+        self.pinned_paths: Set[str] = set()
+        self.active_session_id: Optional[str] = None
+        self.last_activity_time = time.time()
+
+    def handle_event(self, event_type: str, data: dict):
+        """
+        Handle hook event from Claude Code.
+
+        Args:
+            event_type: Type of event ('hook', 'pin', 'unpin')
+            data: Event payload
+        """
+        if event_type == 'hook':
+            self._handle_hook_event(data)
+        elif event_type == 'pin':
+            self._handle_pin_event(data)
+        elif event_type == 'unpin':
+            self._handle_unpin_event(data)
+
+    def _handle_hook_event(self, data: dict):
+        """Handle a Claude Code hook event."""
+        event_name = data.get('eventType', '')
+        session_id = data.get('sessionId', 'default')
+        cwd = data.get('cwd', '')
+
+        logger.debug(f"Hook event: {event_name} | tool: {data.get('tool', 'N/A')} | session: {session_id}")
+
+        # Update last activity time
+        self.last_activity_time = time.time()
+
+        # Get or create session
+        session = self._get_or_create_session(session_id, cwd)
+        session.last_activity = time.time()
+
+        # Handle different event types
+        if event_name == 'PreToolUse':
+            self._handle_pre_tool_use(session, data)
+        elif event_name == 'PostToolUse':
+            self._handle_post_tool_use(session, data)
+        elif event_name in ['Stop', 'SubagentStop']:
+            self._handle_stop(session)
+        elif event_name == 'SessionStart':
+            self._handle_session_start(session, data)
+        elif event_name == 'SessionEnd':
+            self._handle_session_end(session)
+        elif event_name == 'UserPromptSubmit':
+            self._handle_user_prompt(session, data)
+
+        # Update token usage from transcript if available
+        self._update_token_usage(session, data)
+
+        # Emit update signal
+        self.session_updated.emit(session_id)
+        self.activity_changed.emit()
+
+    def _handle_pre_tool_use(self, session: SessionState, data: dict):
+        """Handle PreToolUse event."""
+        tool_name = data.get('tool', 'unknown')
+        tool_input = data.get('toolInput', {})
+
+        # Get tool info from config
+        tool_info = self.config.get_tool_info(tool_name)
+
+        # Create active tool
+        active_tool = ActiveTool(
+            tool_name=tool_name,
+            display_name=tool_info['display_name'],
+            category=tool_info['category'],
+            color=tool_info['color'],
+            pattern=tool_info['pattern'],
+            description=tool_info['description']
+        )
+
+        session.active_tool = active_tool
+        session.is_active = True
+
+        # Add to recent tools
+        session.recent_tools.insert(0, active_tool)
+        session.recent_tools = session.recent_tools[:10]  # Keep last 10
+
+        self.tool_started.emit(session.session_id, tool_name)
+
+    def _handle_post_tool_use(self, session: SessionState, data: dict):
+        """Handle PostToolUse event."""
+        # Tool finished
+        if session.active_tool:
+            self.tool_ended.emit(session.session_id, session.active_tool.tool_name)
+        session.active_tool = None
+
+    def _handle_stop(self, session: SessionState):
+        """Handle Stop event (Claude finished responding)."""
+        session.active_tool = None
+        session.is_active = False
+
+    def _handle_session_start(self, session: SessionState, data: dict):
+        """Handle SessionStart event."""
+        session.start_time = time.time()
+        session.is_active = True
+
+    def _handle_session_end(self, session: SessionState):
+        """Handle SessionEnd event."""
+        session.is_active = False
+        self.session_ended.emit(session.session_id)
+
+        # Remove session after a delay (keep it visible for a bit)
+        # In production, you might want to use a timer for this
+
+    def _handle_user_prompt(self, session: SessionState, data: dict):
+        """Handle UserPromptSubmit event."""
+        session.is_active = True
+
+    def _handle_pin_event(self, data: dict):
+        """Handle session pin event."""
+        session_id = data.get('sessionId', '')
+        cwd = data.get('cwd', '')
+
+        if cwd:
+            self.pinned_paths.add(cwd)
+            logger.info(f"Pinned session: {cwd}")
+            self.activity_changed.emit()
+
+    def _handle_unpin_event(self, data: dict):
+        """Handle session unpin event."""
+        self.pinned_paths.clear()
+        logger.info("Unpinned all sessions")
+        self.activity_changed.emit()
+
+    def _get_or_create_session(self, session_id: str, cwd: str) -> SessionState:
+        """Get existing session or create new one."""
+        if session_id in self.sessions:
+            return self.sessions[session_id]
+
+        # Create new session
+        project_path = cwd or "Unknown"
+        project_name = Path(project_path).name if project_path != "Unknown" else "Unknown"
+
+        session = SessionState(
+            session_id=session_id,
+            project_path=project_path,
+            project_name=project_name
+        )
+
+        self.sessions[session_id] = session
+        self.active_session_id = session_id
+
+        return session
+
+    def _update_token_usage(self, session: SessionState, data: dict):
+        """Update token usage from transcript data."""
+        transcript = data.get('transcript', '')
+
+        if not transcript:
+            return
+
+        # Parse transcript to extract token usage
+        # The transcript is a JSON string containing conversation history
+        try:
+            transcript_data = json.loads(transcript) if isinstance(transcript, str) else transcript
+
+            # Calculate total tokens from transcript
+            total_input = 0
+            total_output = 0
+            cache_creation = 0
+            cache_read = 0
+
+            for msg in transcript_data.get('messages', []):
+                usage = msg.get('usage', {})
+                total_input += usage.get('input_tokens', 0)
+                total_output += usage.get('output_tokens', 0)
+                cache_creation += usage.get('cache_creation_input_tokens', 0)
+                cache_read += usage.get('cache_read_input_tokens', 0)
+
+            session.token_stats.input_tokens = total_input
+            session.token_stats.output_tokens = total_output
+            session.token_stats.cache_creation_tokens = cache_creation
+            session.token_stats.cache_read_tokens = cache_read
+
+            # Calculate context percentage (rough estimate)
+            # Assume 200k context window
+            context_window = 200000
+            total_context_tokens = total_input + total_output
+            session.context_tokens = total_context_tokens
+            session.context_percent = min((total_context_tokens / context_window) * 100, 100)
+
+        except Exception as e:
+            logger.debug(f"Error parsing transcript for token usage: {e}")
+
+    def get_current_session(self) -> Optional[SessionState]:
+        """Get the currently active session."""
+        if self.active_session_id and self.active_session_id in self.sessions:
+            return self.sessions[self.active_session_id]
+
+        # Return any active session
+        for session in self.sessions.values():
+            if session.is_active or session.active_tool:
+                return session
+
+        return None
+
+    def get_display_sessions(self) -> List[SessionState]:
+        """Get sessions to display (active or pinned)."""
+        display = []
+
+        for session in self.sessions.values():
+            # Show if active, has active tool, or is pinned
+            if session.is_active or session.active_tool or session.project_path in self.pinned_paths:
+                if not session.is_stale:
+                    display.append(session)
+
+        return sorted(display, key=lambda s: s.last_activity, reverse=True)
+
+    def cleanup_stale_sessions(self):
+        """Remove stale sessions."""
+        to_remove = []
+
+        for session_id, session in self.sessions.items():
+            if session.is_stale and not session.is_active and session.project_path not in self.pinned_paths:
+                to_remove.append(session_id)
+
+        for session_id in to_remove:
+            logger.debug(f"Removing stale session: {session_id}")
+            del self.sessions[session_id]
+
+    @property
+    def has_activity(self) -> bool:
+        """Check if there's any current activity."""
+        return any(s.is_active or s.active_tool for s in self.sessions.values())
+
+    @property
+    def is_idle(self) -> bool:
+        """Check if system has been idle."""
+        idle_timeout = self.config.defaults.get('idleTimeout', 15)
+        return time.time() - self.last_activity_time > idle_timeout

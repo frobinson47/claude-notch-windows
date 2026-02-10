@@ -1,0 +1,261 @@
+"""
+System tray icon for Claude Code Notch.
+Displays current activity status and provides menu access.
+"""
+
+import logging
+from typing import Optional
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PyQt5.QtCore import Qt, QTimer
+from state_manager import StateManager, NotchConfig
+
+logger = logging.getLogger(__name__)
+
+
+class ClaudeNotchTray(QSystemTrayIcon):
+    """System tray icon that shows Claude Code activity."""
+
+    def __init__(self, state_manager: StateManager, parent=None):
+        """Initialize tray icon."""
+        super().__init__(parent)
+
+        self.state_manager = state_manager
+        self.config = state_manager.config
+        self.overlay_window = None
+
+        # Create initial icon
+        self._update_icon()
+
+        # Create menu
+        self._create_menu()
+
+        # Connect to state manager signals
+        self.state_manager.activity_changed.connect(self._on_activity_changed)
+        self.state_manager.session_updated.connect(self._on_session_updated)
+
+        # Set tooltip
+        self.setToolTip("Claude Code - Idle")
+
+        # Connect double-click to show overlay
+        self.activated.connect(self._on_activated)
+
+        # Timer for periodic updates
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self._periodic_update)
+        self.update_timer.start(1000)  # Update every second
+
+        # Show tray icon
+        self.show()
+
+        logger.info("System tray icon initialized")
+
+    def _create_menu(self):
+        """Create context menu."""
+        menu = QMenu()
+
+        # Show/Hide Overlay
+        self.show_overlay_action = QAction("Show Overlay", menu)
+        self.show_overlay_action.triggered.connect(self._toggle_overlay)
+        menu.addAction(self.show_overlay_action)
+
+        menu.addSeparator()
+
+        # Settings
+        settings_action = QAction("Settings", menu)
+        settings_action.triggered.connect(self._show_settings)
+        menu.addAction(settings_action)
+
+        # Setup Hooks
+        setup_action = QAction("Setup Hooks", menu)
+        setup_action.triggered.connect(self._run_setup)
+        menu.addAction(setup_action)
+
+        menu.addSeparator()
+
+        # About
+        about_action = QAction("About", menu)
+        about_action.triggered.connect(self._show_about)
+        menu.addAction(about_action)
+
+        menu.addSeparator()
+
+        # Quit
+        quit_action = QAction("Quit", menu)
+        quit_action.triggered.connect(self._quit_app)
+        menu.addAction(quit_action)
+
+        self.setContextMenu(menu)
+
+    def _create_icon(self, color: tuple = (249, 115, 22), text: str = "") -> QIcon:
+        """
+        Create a colored icon for the tray.
+
+        Args:
+            color: RGB tuple for icon color
+            text: Optional text to display on icon
+
+        Returns:
+            QIcon object
+        """
+        # Create a 64x64 pixmap
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw circle
+        painter.setBrush(QColor(*color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(4, 4, 56, 56)
+
+        # Draw text if provided
+        if text:
+            painter.setPen(QColor(255, 255, 255))
+            font = QFont()
+            font.setPixelSize(24)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+
+        painter.end()
+
+        return QIcon(pixmap)
+
+    def _update_icon(self):
+        """Update tray icon based on current activity."""
+        session = self.state_manager.get_current_session()
+
+        if not session or not session.active_tool:
+            # Idle - gray
+            color = self.config.get_color_rgb('slate')
+            text = ""
+            tooltip = "Claude Code - Idle"
+        else:
+            # Active - use tool color
+            tool = session.active_tool
+            color = self.config.get_color_rgb(tool.color)
+
+            # Use first letter of category as text
+            text = tool.category[0].upper() if tool.category else ""
+
+            # Build tooltip
+            tooltip = f"Claude Code - {tool.display_name}"
+            if session.project_name:
+                tooltip += f"\n{session.project_name}"
+            if session.context_percent > 0:
+                tooltip += f"\nContext: {session.context_percent:.1f}%"
+
+        # Update icon and tooltip
+        icon = self._create_icon(color, text)
+        self.setIcon(icon)
+        self.setToolTip(tooltip)
+
+    def _on_activity_changed(self):
+        """Handle activity change signal."""
+        self._update_icon()
+
+    def _on_session_updated(self, session_id: str):
+        """Handle session update signal."""
+        self._update_icon()
+
+    def _periodic_update(self):
+        """Periodic update (cleanup, etc.)."""
+        # Cleanup stale sessions
+        self.state_manager.cleanup_stale_sessions()
+
+        # Update icon (in case something changed)
+        self._update_icon()
+
+    def _on_activated(self, reason):
+        """Handle tray icon activation."""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._toggle_overlay()
+
+    def _toggle_overlay(self):
+        """Toggle overlay window visibility."""
+        if self.overlay_window is None:
+            # Create overlay window (lazy load)
+            from overlay_window import ClaudeNotchOverlay
+            self.overlay_window = ClaudeNotchOverlay(self.state_manager)
+
+        if self.overlay_window.isVisible():
+            self.overlay_window.hide()
+            self.show_overlay_action.setText("Show Overlay")
+        else:
+            self.overlay_window.show()
+            self.show_overlay_action.setText("Hide Overlay")
+
+    def _show_settings(self):
+        """Show settings dialog."""
+        # TODO: Implement settings dialog
+        self.showMessage(
+            "Settings",
+            "Settings dialog coming soon!",
+            QSystemTrayIcon.Information,
+            2000
+        )
+
+    def _run_setup(self):
+        """Run hook setup."""
+        # TODO: Implement setup manager
+        self.showMessage(
+            "Setup",
+            "Opening setup wizard...",
+            QSystemTrayIcon.Information,
+            2000
+        )
+
+        try:
+            from setup_manager import SetupManager
+            setup = SetupManager()
+            success = setup.install_hooks()
+
+            if success:
+                self.showMessage(
+                    "Setup Complete",
+                    "Claude Code hooks installed successfully!",
+                    QSystemTrayIcon.Information,
+                    3000
+                )
+            else:
+                self.showMessage(
+                    "Setup Failed",
+                    "Failed to install hooks. Check logs for details.",
+                    QSystemTrayIcon.Warning,
+                    3000
+                )
+        except Exception as e:
+            logger.error(f"Setup error: {e}")
+            self.showMessage(
+                "Setup Error",
+                f"Error: {str(e)}",
+                QSystemTrayIcon.Critical,
+                3000
+            )
+
+    def _show_about(self):
+        """Show about message."""
+        self.showMessage(
+            "Claude Code Notch for Windows",
+            "Version 1.0.0\n\nA Windows companion app for Claude Code CLI.\n\nDisplays real-time AI activity.",
+            QSystemTrayIcon.Information,
+            5000
+        )
+
+    def _quit_app(self):
+        """Quit the application."""
+        logger.info("Quitting application")
+
+        # Hide overlay if visible
+        if self.overlay_window:
+            self.overlay_window.close()
+
+        # Quit app
+        from PyQt5.QtWidgets import QApplication
+        QApplication.instance().quit()
+
+    def set_overlay_window(self, window):
+        """Set the overlay window reference."""
+        self.overlay_window = window
