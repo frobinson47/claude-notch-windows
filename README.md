@@ -7,7 +7,6 @@ A Windows companion app for Claude Code CLI that displays real-time AI activity 
 - **System Tray Integration** - Always-visible status indicator with color-coded activity
 - **Floating Overlay Window** - Animated activity display with session cards
 - **Real-time Activity Tracking** - See what Claude is doing (Reading, Writing, Executing, etc.)
-- **Token Usage Monitoring** - Track context window usage
 - **Session Management** - Pin/unpin sessions for persistent display
 - **Settings Dialog** - Dark-themed settings with live preview for all preferences
 - **Semantic Design System** - Color-coded activities with smooth animations
@@ -54,7 +53,6 @@ The floating overlay shows detailed activity:
 - **Activity Indicator** - 3x2 grid animation showing current pattern
 - **Project Info** - Current project name and working directory
 - **Tool Status** - What Claude is currently doing
-- **Context Percentage** - How much of the context window is used
 
 **Controls:**
 - **Double-click tray icon** - Show/hide overlay
