@@ -88,20 +88,23 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
 
     def _handle_hook(self, data: dict):
         """Handle hook event."""
-        if self.event_callback:
-            self.event_callback('hook', data)
+        callback = ClaudeCodeHTTPHandler.event_callback
+        if callback:
+            callback('hook', data)
         logger.debug(f"Hook event: {data.get('eventType', 'unknown')}")
 
     def _handle_pin(self, data: dict):
         """Handle pin session event."""
-        if self.event_callback:
-            self.event_callback('pin', data)
+        callback = ClaudeCodeHTTPHandler.event_callback
+        if callback:
+            callback('pin', data)
         logger.info(f"Pin session: {data.get('sessionId', 'unknown')}")
 
     def _handle_unpin(self, data: dict):
         """Handle unpin session event."""
-        if self.event_callback:
-            self.event_callback('unpin', data)
+        callback = ClaudeCodeHTTPHandler.event_callback
+        if callback:
+            callback('unpin', data)
         logger.info("Unpin all sessions")
 
     def _handle_health(self):
@@ -114,9 +117,10 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
 
     def _send_status_response(self):
         """Send status response with real session data."""
-        if self.status_callback:
+        callback = ClaudeCodeHTTPHandler.status_callback
+        if callback:
             try:
-                status_data = self.status_callback()
+                status_data = callback()
             except Exception as e:
                 logger.error(f"Error getting status: {e}")
                 status_data = {"status": "error", "error": str(e)}

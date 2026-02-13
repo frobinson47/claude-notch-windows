@@ -7,7 +7,7 @@ import sys
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QObject, Signal, Slot
 
 # Add src directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -37,6 +37,20 @@ def setup_logging():
     )
 
     return logging.getLogger(__name__)
+
+
+class _EventBridge(QObject):
+    """Thread-safe bridge: HTTP thread emits signal, Qt main thread handles it."""
+    event_signal = Signal(str, object)  # event_type, data dict
+
+    def __init__(self, state_manager):
+        super().__init__()
+        self._state_manager = state_manager
+        self.event_signal.connect(self._on_event)
+
+    @Slot(str, object)
+    def _on_event(self, event_type, data):
+        self._state_manager.handle_event(event_type, data)
 
 
 class ClaudeNotchApp:
@@ -69,15 +83,13 @@ class ClaudeNotchApp:
         self.logger.info("State manager created")
 
         # Create HTTP server (port from user settings)
-        # Wrap callback to marshal from HTTP thread to Qt main thread
+        # Bridge marshals events from HTTP thread -> Qt main thread via signal
         server_port = self.user_settings.get("server_port")
-
-        def _thread_safe_callback(event_type, data):
-            QTimer.singleShot(0, lambda et=event_type, d=data: self.state_manager.handle_event(et, d))
+        self._event_bridge = _EventBridge(self.state_manager)
 
         self.server = ClaudeCodeServer(
             port=server_port,
-            event_callback=_thread_safe_callback,
+            event_callback=self._event_bridge.event_signal.emit,
             status_callback=self.state_manager.get_status_dict,
         )
 
