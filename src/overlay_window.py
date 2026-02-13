@@ -271,7 +271,14 @@ class SessionCard(QWidget):
             # Duration evolution: slow animation for long-running tools
             elapsed = time.time() - tool.started_at
             level_name, duration_mult = self.config.get_duration_speed_mult(elapsed)
-            if not hasattr(self, '_last_duration_level') or self._last_duration_level != level_name:
+
+            # Detect tool change or duration level change — only then call set_pattern
+            # to avoid restarting animations every tick
+            tool_key = (tool.tool_name, tool.started_at)
+            last_key = getattr(self, '_last_tool_key', None)
+            last_level = getattr(self, '_last_duration_level', None)
+            if tool_key != last_key or level_name != last_level:
+                self._last_tool_key = tool_key
                 self._last_duration_level = level_name
                 effective_speed = speed * duration_mult
                 self.activity_indicator.set_pattern(
@@ -281,6 +288,7 @@ class SessionCard(QWidget):
                 )
         else:
             # Idle - dormant pattern
+            self._last_tool_key = None
             self._last_duration_level = "normal"
             color_rgb = self.config.get_color_rgb('slate')
             pattern_config = self.config.get_pattern_config('dormant')
