@@ -77,7 +77,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-This will install PyQt5, which is the only dependency.
+This will install PySide6, which is the only dependency.
 
 #### 5. Run the Application
 
@@ -232,8 +232,8 @@ python -m pip install --upgrade pip
 # Install with verbose output
 pip install -v -r requirements.txt
 
-# If PyQt5 fails, try installing separately
-pip install PyQt5
+# If PySide6 fails, try installing separately
+pip install PySide6
 ```
 
 ## Uninstallation

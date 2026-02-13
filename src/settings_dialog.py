@@ -4,13 +4,13 @@ Non-modal, frameless dialog with live-updating preferences.
 """
 
 import logging
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QSpinBox, QCheckBox, QComboBox, QSlider,
     QPushButton, QGroupBox, QFormLayout, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont
 
 logger = logging.getLogger(__name__)
 
@@ -273,8 +273,8 @@ class SettingsDialog(QDialog):
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 255)
         self.opacity_slider.setValue(self.user_settings.get("background_opacity"))
-        self.opacity_label = QLabel(str(self.opacity_slider.value()))
-        self.opacity_label.setFixedWidth(30)
+        self.opacity_label = QLabel(f"{round(self.opacity_slider.value() / 255 * 100)}%")
+        self.opacity_label.setFixedWidth(40)
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
         opacity_layout.addWidget(self.opacity_slider)
         opacity_layout.addWidget(self.opacity_label)
@@ -387,7 +387,7 @@ class SettingsDialog(QDialog):
     # ── Callbacks ────────────────────────────────────────────────
 
     def _on_opacity_changed(self, value: int):
-        self.opacity_label.setText(str(value))
+        self.opacity_label.setText(f"{round(value / 255 * 100)}%")
         self.user_settings.set("background_opacity", value)
 
     def _on_speed_changed(self, value: int):
@@ -452,10 +452,10 @@ class SettingsDialog(QDialog):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.LeftButton and not self._drag_pos.isNull():
-            self.move(event.globalPos() - self._drag_pos)
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()

@@ -21,9 +21,9 @@ pip install -r requirements.txt
 
 **Expected output:**
 ```
-Collecting PyQt5>=5.15.0
-  Downloading PyQt5-5.15.x...
-Successfully installed PyQt5-5.15.x ...
+Collecting PySide6>=6.5.0
+  Downloading PySide6-6.x.x...
+Successfully installed PySide6-6.x.x ...
 ```
 
 ### 2. Run the Application
@@ -151,13 +151,13 @@ netstat -ano | findstr :27182
 taskkill /PID <PID> /F
 ```
 
-### "PyQt5 won't install"
+### "PySide6 won't install"
 
 Update pip first:
 
 ```powershell
 python -m pip install --upgrade pip
-pip install PyQt5
+pip install PySide6
 ```
 
 ### "Hooks not working"

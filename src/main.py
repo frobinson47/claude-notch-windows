@@ -6,8 +6,8 @@ Main application entry point.
 import sys
 import logging
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt, QTimer
 
 # Add src directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -69,16 +69,29 @@ class ClaudeNotchApp:
         self.logger.info("State manager created")
 
         # Create HTTP server (port from user settings)
+        # Wrap callback to marshal from HTTP thread to Qt main thread
         server_port = self.user_settings.get("server_port")
+
+        def _thread_safe_callback(event_type, data):
+            QTimer.singleShot(0, lambda et=event_type, d=data: self.state_manager.handle_event(et, d))
+
         self.server = ClaudeCodeServer(
             port=server_port,
-            event_callback=self.state_manager.handle_event
+            event_callback=_thread_safe_callback,
+            status_callback=self.state_manager.get_status_dict,
         )
 
         # Start server
         try:
             self.server.start()
             self.logger.info(f"HTTP server started on port {server_port}")
+        except OSError as e:
+            # errno 10048 = WSAEADDRINUSE on Windows
+            if getattr(e, 'errno', None) == 10048 or "address already in use" in str(e).lower():
+                self.logger.error(f"Another instance is already running (port {server_port} in use)")
+            else:
+                self.logger.error(f"Failed to start server: {e}")
+            sys.exit(1)
         except Exception as e:
             self.logger.error(f"Failed to start server: {e}")
             sys.exit(1)
@@ -97,7 +110,7 @@ class ClaudeNotchApp:
     def run(self):
         """Run the application."""
         self.logger.info("Application running")
-        return self.app.exec_()
+        return self.app.exec()
 
     def cleanup(self):
         """Cleanup on exit."""

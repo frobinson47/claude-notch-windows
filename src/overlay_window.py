@@ -4,11 +4,13 @@ Transparent, click-through window positioned at top-right of screen.
 """
 
 import logging
+import math
 import random
+import time
 from typing import List, Optional
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
-from PyQt5.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QProgressBar
+from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QGuiApplication
 from state_manager import StateManager, SessionState
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,8 @@ class ActivityIndicator(QWidget):
         self.animation_timer.timeout.connect(self._animate_step)
 
     def set_pattern(self, pattern_name: str, color_rgb: tuple, config: dict,
-                    speed_multiplier: float = 1.0, animations_enabled: bool = True):
+                    speed_multiplier: float = 1.0, animations_enabled: bool = True,
+                    attention_config: dict = None):
         """
         Set the animation pattern.
 
@@ -47,10 +50,18 @@ class ActivityIndicator(QWidget):
             config: Pattern configuration dict
             speed_multiplier: Speed multiplier for animation interval
             animations_enabled: Whether animations are enabled
+            attention_config: Attention level config with opacity range
         """
         self.color = QColor(*color_rgb)
         self.pattern_config = config
         self.sequence_index = 0
+
+        # Set opacity from attention level (fixed midpoint of range)
+        if attention_config:
+            opacity_range = attention_config.get('opacity', [0.6, 0.85])
+            self.opacity_value = (opacity_range[0] + opacity_range[1]) / 2
+        else:
+            self.opacity_value = 0.8
 
         if not animations_enabled:
             # Show static first frame
@@ -97,8 +108,9 @@ class ActivityIndicator(QWidget):
             self.lit_squares = random.sample(range(6), num_lit)
 
         elif mode == 'breathe':
-            # All squares pulse together (handled via opacity)
+            # All squares pulse together via sinusoidal opacity
             self.lit_squares = [0, 1, 2, 3, 4, 5]
+            self.opacity_value = 0.65 + 0.35 * math.sin(time.time() * 2.0)
 
         elif mode == 'static':
             # Static pattern
@@ -192,6 +204,16 @@ class SessionCard(QWidget):
         self.context_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 11px;")
         text_layout.addWidget(self.context_label)
 
+        # Context progress bar
+        self.context_bar = QProgressBar()
+        self.context_bar.setRange(0, 100)
+        self.context_bar.setValue(0)
+        self.context_bar.setFixedHeight(6)
+        self.context_bar.setTextVisible(False)
+        self.context_bar.setVisible(False)
+        self._update_context_bar_color(0)
+        text_layout.addWidget(self.context_bar)
+
         layout.addLayout(text_layout)
         layout.addStretch()
 
@@ -199,16 +221,38 @@ class SessionCard(QWidget):
         self.update_animation()
 
     def _get_status_text(self) -> str:
-        """Get status text."""
-        if self.session.active_tool:
-            return self.session.active_tool.display_name
-        return "Idle"
+        """Get status text, with permission mode badge for non-default modes."""
+        text = self.session.active_tool.display_name if self.session.active_tool else "Idle"
+        mode = self.session.permission_mode
+        if mode and mode not in ("", "normal", "default"):
+            text += f"  [{mode}]"
+        return text
 
     def _get_context_text(self) -> str:
         """Get context percentage text."""
         if self.session.context_percent > 0:
             return f"Context: {self.session.context_percent:.1f}%"
         return ""
+
+    def _update_context_bar_color(self, percent: int):
+        """Set progress bar color based on usage thresholds."""
+        if percent >= 80:
+            color = "#EF4444"  # red
+        elif percent >= 50:
+            color = "#F59E0B"  # amber
+        else:
+            color = "#22C55E"  # green
+        self.context_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background: rgba(255, 255, 255, 0.1);
+                border: none;
+                border-radius: 3px;
+            }}
+            QProgressBar::chunk {{
+                background: {color};
+                border-radius: 3px;
+            }}
+        """)
 
     def update_animation(self):
         """Update animation based on current session state."""
@@ -222,17 +266,29 @@ class SessionCard(QWidget):
             tool = self.session.active_tool
             color_rgb = self.config.get_color_rgb(tool.color)
             pattern_config = self.config.get_pattern_config(tool.pattern)
-            self.activity_indicator.set_pattern(
-                tool.pattern, color_rgb, pattern_config,
-                speed_multiplier=speed, animations_enabled=enabled,
-            )
+            attention_config = self.config.get_attention_config(tool.attention)
+
+            # Duration evolution: slow animation for long-running tools
+            elapsed = time.time() - tool.started_at
+            level_name, duration_mult = self.config.get_duration_speed_mult(elapsed)
+            if not hasattr(self, '_last_duration_level') or self._last_duration_level != level_name:
+                self._last_duration_level = level_name
+                effective_speed = speed * duration_mult
+                self.activity_indicator.set_pattern(
+                    tool.pattern, color_rgb, pattern_config,
+                    speed_multiplier=effective_speed, animations_enabled=enabled,
+                    attention_config=attention_config,
+                )
         else:
             # Idle - dormant pattern
+            self._last_duration_level = "normal"
             color_rgb = self.config.get_color_rgb('slate')
             pattern_config = self.config.get_pattern_config('dormant')
+            idle_attention = self.config.get_attention_config('peripheral')
             self.activity_indicator.set_pattern(
                 'dormant', color_rgb, pattern_config,
                 speed_multiplier=speed, animations_enabled=enabled,
+                attention_config=idle_attention,
             )
 
     def update_display(self):
@@ -240,6 +296,10 @@ class SessionCard(QWidget):
         self.project_label.setText(self.session.display_name)
         self.status_label.setText(self._get_status_text())
         self.context_label.setText(self._get_context_text())
+        percent = int(self.session.context_percent)
+        self.context_bar.setValue(percent)
+        self.context_bar.setVisible(percent > 0)
+        self._update_context_bar_color(percent)
         self.update_animation()
 
 
@@ -256,6 +316,8 @@ class ClaudeNotchOverlay(QWidget):
         self.config = state_manager.config
         self.user_settings = user_settings
         self.session_cards = {}  # session_id -> SessionCard
+        self._user_dragged = False  # True after user drags overlay
+        self._is_fading_out = False  # Guard against show during hide cleanup
 
         # Window flags for overlay
         self.setWindowFlags(
@@ -283,6 +345,11 @@ class ClaudeNotchOverlay(QWidget):
         # Position window
         self._position_window()
 
+        # Fade animation for show/hide
+        self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
+        self._fade_animation.setDuration(200)
+        self._fade_animation.setEasingCurve(QEasingCurve.InOutCubic)
+
         # Update timer
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._periodic_update)
@@ -301,10 +368,8 @@ class ClaudeNotchOverlay(QWidget):
 
     def _position_window(self):
         """Position window at the configured screen corner."""
-        from PyQt5.QtWidgets import QDesktopWidget
-
-        desktop = QDesktopWidget()
-        screen_rect = desktop.availableGeometry()
+        screen = QGuiApplication.primaryScreen()
+        screen_rect = screen.availableGeometry()
         padding = 20
 
         position = "top-right"
@@ -364,25 +429,25 @@ class ClaudeNotchOverlay(QWidget):
         if self.user_settings:
             auto_hide = self.user_settings.get("auto_hide")
 
+        should_show = False
         if auto_hide:
-            if sessions and not self.state_manager.is_idle:
-                if not self.isVisible():
-                    self.show()
-            else:
-                if self.isVisible():
-                    self.hide()
+            should_show = bool(sessions) and not self.state_manager.is_idle
         else:
-            # Always visible when auto_hide is off (as long as there are sessions)
-            if sessions:
-                if not self.isVisible():
-                    self.show()
-            else:
-                if self.isVisible():
-                    self.hide()
+            should_show = bool(sessions)
+
+        if should_show:
+            if not self.isVisible() and not self._is_fading_out:
+                self._animated_show()
+        else:
+            if self.isVisible() and not self._is_fading_out:
+                self._animated_hide()
 
         # Adjust window size
         self.adjustSize()
-        self._position_window()
+        if self._user_dragged:
+            self._clamp_to_screen()
+        else:
+            self._position_window()
 
     def _periodic_update(self):
         """Periodic update."""
@@ -407,9 +472,79 @@ class ClaudeNotchOverlay(QWidget):
         path.addRoundedRect(0, 0, self.width(), self.height(), 15, 15)
         painter.drawPath(path)
 
+    def _animated_show(self):
+        """Show overlay with fade-in animation."""
+        animations_enabled = True
+        if self.user_settings:
+            animations_enabled = self.user_settings.get("animations_enabled")
+
+        self._is_fading_out = False
+        if not animations_enabled:
+            self.setWindowOpacity(1.0)
+            self.show()
+            return
+
+        self._fade_animation.stop()
+        self.setWindowOpacity(0.0)
+        self.show()
+        self._fade_animation.setStartValue(0.0)
+        self._fade_animation.setEndValue(1.0)
+        try:
+            self._fade_animation.finished.disconnect()
+        except RuntimeError:
+            pass
+        self._fade_animation.finished.connect(self._on_show_finished)
+        self._fade_animation.start()
+
+    def _on_show_finished(self):
+        """Safety net: ensure full opacity after show animation."""
+        self.setWindowOpacity(1.0)
+
+    def _animated_hide(self):
+        """Hide overlay with fade-out animation."""
+        animations_enabled = True
+        if self.user_settings:
+            animations_enabled = self.user_settings.get("animations_enabled")
+
+        if not animations_enabled:
+            self.hide()
+            return
+
+        self._is_fading_out = True
+        self._fade_animation.stop()
+        self._fade_animation.setStartValue(self.windowOpacity())
+        self._fade_animation.setEndValue(0.0)
+        try:
+            self._fade_animation.finished.disconnect()
+        except RuntimeError:
+            pass
+        self._fade_animation.finished.connect(self._on_hide_finished)
+        self._fade_animation.start()
+
+    def _on_hide_finished(self):
+        """Complete the hide after fade-out."""
+        self.hide()
+        self._is_fading_out = False
+        self.setWindowOpacity(1.0)
+
+    def _clamp_to_screen(self):
+        """Clamp overlay position to screen edges after drag + resize."""
+        screen = QGuiApplication.primaryScreen()
+        screen_rect = screen.availableGeometry()
+        pos = self.pos()
+        x = max(screen_rect.left(), min(pos.x(), screen_rect.right() - self.width()))
+        y = max(screen_rect.top(), min(pos.y(), screen_rect.bottom() - self.height()))
+        self.move(x, y)
+
+    def reset_position(self):
+        """Reset overlay to configured corner (called from tray menu)."""
+        self._user_dragged = False
+        self._position_window()
+
     def _on_setting_changed(self, key: str):
         """React to user setting changes."""
         if key == "screen_position":
+            self._user_dragged = False
             self._position_window()
         elif key == "background_opacity":
             self.update()  # triggers paintEvent
@@ -422,11 +557,12 @@ class ClaudeNotchOverlay(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse press for dragging."""
         if event.button() == Qt.LeftButton:
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
         """Handle mouse move for dragging."""
         if event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self.drag_position)
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            self._user_dragged = True
             event.accept()

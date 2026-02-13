@@ -2,7 +2,7 @@
 
 ## Overview
 
-A complete Windows port of the macOS cookinn.notch app, built with Python + PyQt5.
+A complete Windows port of the macOS cookinn.notch app, built with Python + PySide6 (Qt 6).
 
 **Status:** ✅ Full implementation complete
 
@@ -86,7 +86,7 @@ A complete Windows port of the macOS cookinn.notch app, built with Python + PyQt
        ▼       ▼
 ┌──────────┐ ┌──────────┐
 │ Tray Icon│ │ Overlay  │
-│  (PyQt5) │ │ (PyQt5)  │
+│  (PySide6) │ │ (PySide6)  │
 └──────────┘ └──────────┘
 ```
 
@@ -108,7 +108,7 @@ claude-notch-windows/
 ├── config/
 │   └── notch-config.json       # Semantic design configuration
 ├── resources/                  # (empty - for future icons)
-├── requirements.txt            # PyQt5
+├── requirements.txt            # PySide6
 ├── run.bat                     # Windows launcher
 ├── README.md                   # User documentation
 ├── INSTALL.md                  # Installation guide
@@ -141,7 +141,7 @@ claude-notch-windows/
 ### What's Different
 
 1. **No Hardware Notch** - Uses system tray + floating window instead
-2. **UI Framework** - PyQt5 instead of Swift/SwiftUI
+2. **UI Framework** - PySide6 (Qt 6) instead of Swift/SwiftUI
 3. **Hooks** - PowerShell instead of Bash
 4. **Paths** - Windows paths (AppData) instead of Unix (~/.config)
 5. **Server** - Python http.server instead of Network.framework
@@ -156,7 +156,7 @@ claude-notch-windows/
 
 ## Performance Characteristics
 
-- **Memory:** ~50-80 MB (PyQt5 + Python)
+- **Memory:** ~50-80 MB (PySide6 + Python)
 - **CPU:** <1% idle, ~2-5% during active animation
 - **Startup Time:** ~1-2 seconds
 - **HTTP Latency:** <10ms for event processing
@@ -165,7 +165,7 @@ claude-notch-windows/
 ## Dependencies
 
 - **Python:** 3.8+ (tested on 3.11)
-- **PyQt5:** 5.15+ (GUI framework)
+- **PySide6:** 6.5+ (GUI framework)
 - **PowerShell:** Built into Windows
 - **Claude Code:** Latest version
 
@@ -258,7 +258,7 @@ See [INSTALL.md](INSTALL.md) for detailed troubleshooting steps.
 Common issues:
 - Port 27182 in use → Kill conflicting process
 - PowerShell execution policy → `Set-ExecutionPolicy RemoteSigned`
-- PyQt5 won't install → Upgrade pip, try separately
+- PySide6 won't install → Upgrade pip, try separately
 
 ## Credits
 

@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
     """Handler for Claude Code hook events."""
 
-    # Class variable to store the callback
+    # Class variables to store callbacks
     event_callback: Optional[Callable] = None
+    status_callback: Optional[Callable] = None
 
     def log_message(self, format, *args):
         """Override to use Python logging instead of stderr."""
@@ -51,7 +52,8 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
             elif path == '/health':
                 self._handle_health()
             elif path == '/status':
-                self._handle_status()
+                self._send_status_response()
+                return
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -70,7 +72,7 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
-        """Handle GET requests (health check)."""
+        """Handle GET requests (health check, status)."""
         if self.path == '/health':
             self._handle_health()
             self.send_response(200)
@@ -78,6 +80,8 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = json.dumps({"status": "running"})
             self.wfile.write(response.encode('utf-8'))
+        elif self.path == '/status':
+            self._send_status_response()
         else:
             self.send_response(404)
             self.end_headers()
@@ -108,25 +112,43 @@ class ClaudeCodeHTTPHandler(BaseHTTPRequestHandler):
         """Handle status request."""
         logger.debug("Status request")
 
+    def _send_status_response(self):
+        """Send status response with real session data."""
+        if self.status_callback:
+            try:
+                status_data = self.status_callback()
+            except Exception as e:
+                logger.error(f"Error getting status: {e}")
+                status_data = {"status": "error", "error": str(e)}
+        else:
+            status_data = {"status": "running"}
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(status_data).encode('utf-8'))
+
 
 class ClaudeCodeServer:
     """HTTP server for Claude Code integration."""
 
-    def __init__(self, port: int = 27182, event_callback: Optional[Callable] = None):
+    def __init__(self, port: int = 27182, event_callback: Optional[Callable] = None,
+                 status_callback: Optional[Callable] = None):
         """
         Initialize server.
 
         Args:
             port: Port to listen on (default: 27182)
             event_callback: Callback function(event_type: str, data: dict)
+            status_callback: Callback function() -> dict for /status endpoint
         """
         self.port = port
         self.server: Optional[HTTPServer] = None
         self.thread: Optional[Thread] = None
         self.running = False
 
-        # Set callback on handler class
+        # Set callbacks on handler class
         ClaudeCodeHTTPHandler.event_callback = event_callback
+        ClaudeCodeHTTPHandler.status_callback = status_callback
 
     def start(self):
         """Start the HTTP server in a background thread."""

@@ -10,7 +10,7 @@ import tempfile
 import winreg
 from pathlib import Path
 from typing import Any, Dict, Optional
-from PyQt5.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ STARTUP_REG_NAME = "ClaudeCodeNotch"
 class UserSettings(QObject):
     """Manages user preferences with file persistence and change signals."""
 
-    settings_changed = pyqtSignal(str)  # emits the key name that changed
+    settings_changed = Signal(str)  # emits the key name that changed
 
     def __init__(self, parent=None):
         super().__init__(parent)

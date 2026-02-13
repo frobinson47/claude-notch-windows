@@ -5,9 +5,9 @@ Displays current activity status and provides menu access.
 
 import logging
 from typing import Optional
-from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
-from PyQt5.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
+from PySide6.QtCore import Qt, QTimer
 from state_manager import StateManager, NotchConfig
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,9 @@ class ClaudeNotchTray(QSystemTrayIcon):
         self.user_settings = user_settings
         self.overlay_window = None
         self._settings_dialog = None
+        self._last_icon_color = None
+        self._last_icon_text = None
+        self._last_tooltip = None
 
         # Create initial icon
         self._update_icon()
@@ -35,6 +38,7 @@ class ClaudeNotchTray(QSystemTrayIcon):
         # Connect to state manager signals
         self.state_manager.activity_changed.connect(self._on_activity_changed)
         self.state_manager.session_updated.connect(self._on_session_updated)
+        self.state_manager.notification_received.connect(self._on_notification)
 
         # Connect user settings
         if self.user_settings:
@@ -64,6 +68,11 @@ class ClaudeNotchTray(QSystemTrayIcon):
         self.show_overlay_action = QAction("Show Overlay", menu)
         self.show_overlay_action.triggered.connect(self._toggle_overlay)
         menu.addAction(self.show_overlay_action)
+
+        # Reset Position
+        reset_pos_action = QAction("Reset Position", menu)
+        reset_pos_action.triggered.connect(self._reset_overlay_position)
+        menu.addAction(reset_pos_action)
 
         menu.addSeparator()
 
@@ -157,7 +166,13 @@ class ClaudeNotchTray(QSystemTrayIcon):
             if session.context_percent > 0:
                 tooltip += f"\nContext: {session.context_percent:.1f}%"
 
-        # Update icon and tooltip
+        # Skip icon rebuild if nothing changed
+        if color == self._last_icon_color and text == self._last_icon_text and tooltip == self._last_tooltip:
+            return
+        self._last_icon_color = color
+        self._last_icon_text = text
+        self._last_tooltip = tooltip
+
         icon = self._create_icon(color, text)
         self.setIcon(icon)
         self.setToolTip(tooltip)
@@ -174,6 +189,15 @@ class ClaudeNotchTray(QSystemTrayIcon):
         """React to user setting changes."""
         if key == "show_category_letter":
             self._update_icon()
+
+    def _on_notification(self, session_id: str, message: str):
+        """Show tray balloon for a Notification event."""
+        self.showMessage(
+            "Claude Code",
+            message,
+            QSystemTrayIcon.Information,
+            5000
+        )
 
     def _periodic_update(self):
         """Periodic update (cleanup, etc.)."""
@@ -202,6 +226,11 @@ class ClaudeNotchTray(QSystemTrayIcon):
             self.overlay_window.show()
             self.show_overlay_action.setText("Hide Overlay")
 
+    def _reset_overlay_position(self):
+        """Reset overlay to configured screen corner."""
+        if self.overlay_window:
+            self.overlay_window.reset_position()
+
     def _show_settings(self):
         """Show settings dialog."""
         if self._settings_dialog is None:
@@ -215,7 +244,6 @@ class ClaudeNotchTray(QSystemTrayIcon):
 
     def _run_setup(self):
         """Run hook setup."""
-        # TODO: Implement setup manager
         self.showMessage(
             "Setup",
             "Opening setup wizard...",
@@ -269,7 +297,7 @@ class ClaudeNotchTray(QSystemTrayIcon):
             self.overlay_window.close()
 
         # Quit app
-        from PyQt5.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
 
     def set_overlay_window(self, window):

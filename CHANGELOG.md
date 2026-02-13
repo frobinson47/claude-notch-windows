@@ -89,31 +89,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical Details
 - Python 3.8+ compatibility
-- PyQt5 for GUI framework
+- PySide6 for GUI framework
 - HTTP server on port 27182
 - Logs to %APPDATA%\claude-notch-windows\logs
 - Config in %APPDATA%\claude-notch-windows
 - Hooks in %APPDATA%\claude-notch-windows\hooks
 
+## [1.1.0] - 2026-02-13
+
+### Added
+- **Attention levels**: Configurable opacity ranges (peripheral/ambient/focal/urgent) per activity category, driven by `notch-config.json`
+- **Duration evolution**: Animations gradually slow for long-running tools through normal/extended/long/stuck speed tiers
+- **Context progress bar**: Threshold-colored bar (green < 50%, amber 50-80%, red > 80%) showing context window usage per session
+- **Permission mode badge**: Overlay status text shows `[plan]`, `[bypass]`, etc. for non-default permission modes
+- **Notification balloons**: Tray balloon notifications for Claude Code `Notification` events
+- **`/status` API endpoint**: `GET /status` returns real-time JSON with session data, active tools, and idle state
+- **Fade animations**: Overlay window uses QPropertyAnimation for smooth show/hide transitions (200ms InOutCubic)
+- **Reset Position**: Tray menu item to snap overlay back to configured corner after dragging
+- **Test suite**: 55 unit tests (pytest) covering NotchConfig, StateManager event handling, ActiveTool/SessionState dataclasses, and UserSettings validation/persistence
+- **Tray icon dirty checking**: Cached `_last_icon_color`/`_last_icon_text`/`_last_tooltip` to skip redundant icon rebuilds
+
+### Fixed
+- **Breathe animation**: Was static — now uses wall-clock sinusoidal modulation (`math.sin(time.time() * 2.0)`) for frame-rate-independent ~3s breathing cycle
+- **Overlay drag snap-back**: Overlay no longer resets to corner on state updates after user drags it; uses `_user_dragged` flag with screen bounds clamping
+- **Thread safety**: HTTP handler callbacks now dispatch to Qt main thread via `QTimer.singleShot(0, ...)` instead of direct cross-thread signal emission
+- **Single-instance detection**: Port binding error (errno 10048/WSAEADDRINUSE) provides clear "another instance running" message instead of generic error
+- **Duration evolution jitter**: `set_pattern` only called when duration level changes (cached `_last_duration_level`), preventing animation restarts every second
+- **Opacity slider**: Now displays percentage (0-100%) instead of raw 0-255 value
+
+### Changed
+- `requirements.txt` now includes `pytest>=7.0`
+- `overlay_window.py`: `set_pattern()` accepts `attention_config` parameter
+- `state_manager.py`: `ActiveTool` dataclass has new `attention` field
+- `http_server.py`: Supports `status_callback` for `/status` endpoint
+
 ## [Unreleased]
 
 ### Planned Features
-- Settings dialog GUI
 - Custom icon files (instead of generated)
-- Windows toast notifications
 - Token usage statistics panel
 - Theme system (light/dark mode)
 - Multi-monitor smart positioning
-- PyInstaller standalone executable
 - Auto-update system
-- Performance optimizations
+- Global hotkey for show/hide overlay
 
 ### Known Issues
 - Animation smoothness not as high as macOS version
-- No unit tests yet
 - Limited error recovery in some edge cases
 - Icon quality could be improved
-- No GUI for configuration (JSON editing only)
 
 ---
 

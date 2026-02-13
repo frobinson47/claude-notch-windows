@@ -12,7 +12,7 @@ if errorlevel 1 (
 )
 
 REM Check if requirements are installed
-python -c "import PyQt5" >nul 2>&1
+python -c "import PySide6" >nul 2>&1
 if errorlevel 1 (
     echo Installing requirements...
     python -m pip install -r requirements.txt

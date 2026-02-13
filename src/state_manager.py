@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Set
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ class ActiveTool:
     display_name: str = "Working"
     color: str = "orange"
     pattern: str = "cogitate"
+    attention: str = "ambient"
 
 
 @dataclass
@@ -140,6 +141,20 @@ class NotchConfig:
         """Get pattern configuration."""
         return self.patterns.get(pattern_name, self.patterns.get('cogitate', {}))
 
+    def get_attention_config(self, attention_level: str) -> Dict:
+        """Get attention level config (opacity range, pulse flag)."""
+        return self.attention_levels.get(attention_level, self.attention_levels.get('ambient', {}))
+
+    def get_duration_speed_mult(self, elapsed_seconds: float) -> tuple:
+        """Return (level_name, speed_multiplier) for duration evolution."""
+        evolution = self.config.get('duration_evolution', {})
+        for level_name in ['normal', 'extended', 'long', 'stuck']:
+            level = evolution.get(level_name, {})
+            until = level.get('until')
+            if until is None or elapsed_seconds < until:
+                return (level_name, level.get('speedMult', 1.0))
+        return ('stuck', 0.3)
+
 
 class StateManager(QObject):
     """
@@ -148,11 +163,12 @@ class StateManager(QObject):
     """
 
     # Qt signals for UI updates
-    session_updated = pyqtSignal(str)  # session_id
-    session_ended = pyqtSignal(str)  # session_id
-    tool_started = pyqtSignal(str, str)  # session_id, tool_name
-    tool_ended = pyqtSignal(str, str)  # session_id, tool_name
-    activity_changed = pyqtSignal()  # General activity change
+    session_updated = Signal(str)  # session_id
+    session_ended = Signal(str)  # session_id
+    tool_started = Signal(str, str)  # session_id, tool_name
+    tool_ended = Signal(str, str)  # session_id, tool_name
+    activity_changed = Signal()  # General activity change
+    notification_received = Signal(str, str)  # session_id, message
 
     def __init__(self, config: Optional[NotchConfig] = None, user_settings=None):
         """Initialize state manager."""
@@ -206,6 +222,11 @@ class StateManager(QObject):
         session = self._get_or_create_session(session_id, cwd)
         session.last_activity = time.time()
 
+        # Save permission mode if present
+        perm_mode = data.get('permissionMode')
+        if perm_mode:
+            session.permission_mode = perm_mode
+
         # Handle different event types
         if event_name == 'PreToolUse':
             self._handle_pre_tool_use(session, data)
@@ -217,6 +238,8 @@ class StateManager(QObject):
             self._handle_session_start(session, data)
         elif event_name == 'SessionEnd':
             self._handle_session_end(session)
+        elif event_name == 'Notification':
+            self._handle_notification(session, data)
         elif event_name == 'UserPromptSubmit':
             self._handle_user_prompt(session, data)
 
@@ -245,7 +268,8 @@ class StateManager(QObject):
             category=tool_info['category'],
             color=tool_info['color'],
             pattern=tool_info['pattern'],
-            description=tool_info['description']
+            description=tool_info['description'],
+            attention=tool_info['attention'],
         )
 
         session.active_tool = active_tool
@@ -288,6 +312,16 @@ class StateManager(QObject):
         """Handle UserPromptSubmit event."""
         session.is_active = True
 
+    def _handle_notification(self, session: SessionState, data: dict):
+        """Handle Notification event — emit signal for tray balloon."""
+        tool_input = data.get('toolInput', {})
+        if isinstance(tool_input, dict):
+            message = tool_input.get('message', '') or tool_input.get('title', '')
+        else:
+            message = str(tool_input) if tool_input else ''
+        if message:
+            self.notification_received.emit(session.session_id, message)
+
     def _start_grace_period(self, session: SessionState):
         """Transition to 'Thinking' state for the grace period."""
         # Pick a random fun verb from config
@@ -304,6 +338,7 @@ class StateManager(QObject):
             category=category_name,
             color=category.get('color', 'orange'),
             pattern=category.get('pattern', 'cogitate'),
+            attention=category.get('attention', 'ambient'),
         )
 
         # Start (or restart) the grace timer
@@ -396,6 +431,37 @@ class StateManager(QObject):
 
         except Exception as e:
             logger.debug(f"Error parsing transcript for token usage: {e}")
+
+    def get_status_dict(self) -> dict:
+        """Return a serializable dict of current state for the /status endpoint."""
+        # Snapshot to avoid RuntimeError if dict mutates during iteration
+        sessions_snapshot = dict(self.sessions)
+        sessions_list = []
+        for s in sessions_snapshot.values():
+            session_dict = {
+                "session_id": s.session_id,
+                "project_name": s.project_name,
+                "project_path": s.project_path,
+                "is_active": s.is_active,
+                "context_percent": round(s.context_percent, 1),
+                "permission_mode": s.permission_mode,
+                "active_tool": None,
+            }
+            if s.active_tool:
+                session_dict["active_tool"] = {
+                    "tool_name": s.active_tool.tool_name,
+                    "display_name": s.active_tool.display_name,
+                    "category": s.active_tool.category,
+                    "attention": s.active_tool.attention,
+                    "elapsed_seconds": round(time.time() - s.active_tool.started_at, 1),
+                }
+            sessions_list.append(session_dict)
+        return {
+            "status": "running",
+            "is_idle": self.is_idle,
+            "session_count": len(sessions_list),
+            "sessions": sessions_list,
+        }
 
     def get_current_session(self) -> Optional[SessionState]:
         """Get the currently active session."""
