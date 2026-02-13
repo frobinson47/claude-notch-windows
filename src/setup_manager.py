@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -63,9 +64,14 @@ class SetupManager:
         logger.info("Copying hook scripts...")
 
         hook_files = [
+            # Python hooks (primary)
+            "notch-hook.py",
+            "send-to-notch.py",
+            "remove-from-notch.py",
+            # PowerShell hooks (kept for backward compat)
             "notch-hook.ps1",
             "send-to-notch.ps1",
-            "remove-from-notch.ps1"
+            "remove-from-notch.ps1",
         ]
 
         for filename in hook_files:
@@ -80,6 +86,24 @@ class SetupManager:
             logger.debug(f"Copied {filename} to {dest}")
 
         logger.info(f"Hooks copied to {self.hooks_dir}")
+
+    @staticmethod
+    def _get_hook_command(py_script: str, ps1_script: str) -> str:
+        """Build the hook command, preferring Python for speed.
+
+        Falls back to PowerShell with optimized flags if Python isn't
+        resolvable (e.g. PyInstaller bundle without clear sys.executable).
+        """
+        python_exe = sys.executable
+        # Sanity-check: sys.executable should point to a real python
+        if python_exe and os.path.isfile(python_exe) and "python" in os.path.basename(python_exe).lower():
+            return f'"{python_exe}" "{py_script}"'
+
+        # Fallback: PowerShell with optimized startup flags
+        return (
+            f'powershell.exe -NoProfile -NoLogo -NonInteractive '
+            f'-ExecutionPolicy Bypass -File "{ps1_script}"'
+        )
 
     def _update_settings(self):
         """Update Claude Code settings.json to register hooks."""
@@ -98,8 +122,10 @@ class SetupManager:
         if "hooks" not in settings:
             settings["hooks"] = {}
 
-        # Hook script path (use PowerShell)
-        hook_script = str(self.hooks_dir / "notch-hook.ps1").replace("\\", "/")
+        # Build hook command (Python primary, PowerShell fallback)
+        py_hook = str(self.hooks_dir / "notch-hook.py").replace("\\", "/")
+        ps1_hook = str(self.hooks_dir / "notch-hook.ps1").replace("\\", "/")
+        hook_command = self._get_hook_command(py_hook, ps1_hook)
 
         # Events to hook
         events = [
@@ -119,37 +145,45 @@ class SetupManager:
             "hooks": [
                 {
                     "type": "command",
-                    "command": f"powershell.exe -ExecutionPolicy Bypass -File \"{hook_script}\""
+                    "command": hook_command
                 }
             ]
         }
+
+        # Marker strings to detect our previously-installed hooks (old or new)
+        notch_markers = ["notch-hook.ps1", "notch-hook.py"]
 
         for event in events:
             if event not in settings["hooks"]:
                 settings["hooks"][event] = []
 
-            # Check if our hook is already registered
             existing = settings["hooks"][event]
-            already_registered = any(
-                hook_script in json.dumps(entry)
-                for entry in existing
-            )
 
-            if not already_registered:
-                existing.append(notch_hook_entry)
+            # Remove any stale notch hooks (e.g. old PS1 version) before adding new
+            existing[:] = [
+                entry for entry in existing
+                if not any(marker in json.dumps(entry) for marker in notch_markers)
+            ]
+
+            existing.append(notch_hook_entry)
 
         # Add custom commands for pin/unpin
         if "commands" not in settings:
             settings["commands"] = {}
 
+        py_pin = str(self.hooks_dir / "send-to-notch.py").replace("\\", "/")
+        ps1_pin = str(self.hooks_dir / "send-to-notch.ps1").replace("\\", "/")
+        py_unpin = str(self.hooks_dir / "remove-from-notch.py").replace("\\", "/")
+        ps1_unpin = str(self.hooks_dir / "remove-from-notch.ps1").replace("\\", "/")
+
         settings["commands"]["send-to-notch"] = {
             "description": "Pin current session to Windows Notch display",
-            "script": f"powershell.exe -ExecutionPolicy Bypass -File \"{self.hooks_dir / 'send-to-notch.ps1'}\""
+            "script": self._get_hook_command(py_pin, ps1_pin)
         }
 
         settings["commands"]["remove-from-notch"] = {
             "description": "Unpin all sessions from Windows Notch display",
-            "script": f"powershell.exe -ExecutionPolicy Bypass -File \"{self.hooks_dir / 'remove-from-notch.ps1'}\""
+            "script": self._get_hook_command(py_unpin, ps1_unpin)
         }
 
         # Save settings
@@ -173,17 +207,15 @@ class SetupManager:
                 with open(self.settings_file, 'r') as f:
                     settings = json.load(f)
 
-                # Remove hook entries
+                # Remove hook entries (match both Python and PowerShell variants)
+                notch_markers = ["notch-hook.ps1", "notch-hook.py"]
                 if "hooks" in settings:
-                    hook_script = str(self.hooks_dir / "notch-hook.ps1").replace("\\", "/")
-                    keys_to_remove = []
-
-                    for key, value in settings["hooks"].items():
-                        if hook_script in value:
-                            keys_to_remove.append(key)
-
-                    for key in keys_to_remove:
-                        del settings["hooks"][key]
+                    for event, entries in settings["hooks"].items():
+                        if isinstance(entries, list):
+                            entries[:] = [
+                                entry for entry in entries
+                                if not any(m in json.dumps(entry) for m in notch_markers)
+                            ]
 
                 # Remove custom commands
                 if "commands" in settings:
@@ -215,13 +247,14 @@ class SetupManager:
             with open(self.settings_file, 'r') as f:
                 settings = json.load(f)
 
-            hook_script = str(self.hooks_dir / "notch-hook.ps1").replace("\\", "/")
+            # Match either Python or PowerShell hook scripts
+            notch_markers = ["notch-hook.ps1", "notch-hook.py"]
 
             # Check if any hooks point to our script
             if "hooks" in settings:
-                for value in settings["hooks"].values():
-                    if hook_script in value:
-                        return True
+                settings_str = json.dumps(settings["hooks"])
+                if any(m in settings_str for m in notch_markers):
+                    return True
 
             return False
 

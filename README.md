@@ -7,6 +7,7 @@ A Windows companion app for Claude Code CLI that displays real-time AI activity 
 - **System Tray Integration** - Always-visible status indicator with color-coded activity
 - **Floating Overlay Window** - Animated activity display with session cards
 - **Real-time Activity Tracking** - See what Claude is doing (Reading, Writing, Executing, etc.)
+- **"Thinking" State** - Shows fun verbs (Pondering, Noodling, Percolating...) between tool calls instead of flashing idle
 - **Session Management** - Pin/unpin sessions for persistent display
 - **Settings Dialog** - Dark-themed settings with live preview for all preferences
 - **Semantic Design System** - Color-coded activities with smooth animations
@@ -90,7 +91,7 @@ Once hooks are installed, you can use these commands in Claude Code:
 The app uses a semantic color system:
 
 - **Cyan** (Observe) - Reading, searching (Read, Glob, Grep)
-- **Orange** (Think) - Processing, reasoning (internal work)
+- **Orange** (Think) - Processing, reasoning (also used for "Thinking" grace period between tools)
 - **Green** (Create) - Writing new files (Write)
 - **Amber** (Transform) - Editing existing files (Edit)
 - **Red** (Execute) - Running commands (Bash)
@@ -119,9 +120,12 @@ claude-notch-windows/
 │   ├── user_settings.py     # User preferences persistence
 │   └── setup_manager.py     # Hook installation
 ├── hooks/
-│   ├── notch-hook.ps1       # Main event hook
-│   ├── send-to-notch.ps1    # Pin session command
-│   └── remove-from-notch.ps1 # Unpin command
+│   ├── notch-hook.py         # Main event hook (Python, primary)
+│   ├── send-to-notch.py      # Pin session command (Python)
+│   ├── remove-from-notch.py  # Unpin command (Python)
+│   ├── notch-hook.ps1        # Main event hook (PowerShell fallback)
+│   ├── send-to-notch.ps1     # Pin session command (PowerShell fallback)
+│   └── remove-from-notch.ps1 # Unpin command (PowerShell fallback)
 ├── config/
 │   └── notch-config.json    # Semantic design configuration
 ├── main.spec                # PyInstaller build spec
@@ -131,10 +135,10 @@ claude-notch-windows/
 
 ## How It Works
 
-1. **Claude Code** executes PowerShell hooks on various events (PreToolUse, PostToolUse, etc.)
-2. **PowerShell hooks** send JSON payloads to `http://localhost:27182`
+1. **Claude Code** executes hook scripts on various events (PreToolUse, PostToolUse, etc.)
+2. **Hook scripts** send JSON payloads to `http://localhost:27182` (Python hooks by default for ~50-200ms startup; PowerShell fallback if needed)
 3. **HTTP server** receives events and passes them to the state manager
-4. **State manager** updates session states and emits Qt signals
+4. **State manager** updates session states, applies a 3-second grace period ("Thinking" state) between tools, and emits Qt signals
 5. **UI components** (tray icon, overlay) react to state changes and update display
 
 ## Security and Privacy

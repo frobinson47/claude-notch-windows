@@ -5,13 +5,14 @@ Manages session state, active tools, token usage, and UI updates.
 
 import json
 import logging
+import random
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Set
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,17 @@ class StateManager(QObject):
         self.active_session_id: Optional[str] = None
         self.last_activity_time = time.time()
 
+        # Grace period timer — shows "Thinking" between tool calls instead of "Idle"
+        self._grace_timer = QTimer(self)
+        self._grace_timer.setSingleShot(True)
+        self._grace_timer.timeout.connect(self._on_grace_expired)
+        self._grace_session_id: Optional[str] = None
+
+        # Load grace period (seconds) and fun verbs from config
+        self._grace_period_ms = int(self.config.defaults.get('gracePeriod', 3) * 1000)
+        thinking_state = self.config.states.get('thinking', {})
+        self._fun_verbs = thinking_state.get('funVerbs', ['Thinking'])
+
     def handle_event(self, event_type: str, data: dict):
         """
         Handle hook event from Claude Code.
@@ -217,6 +229,9 @@ class StateManager(QObject):
 
     def _handle_pre_tool_use(self, session: SessionState, data: dict):
         """Handle PreToolUse event."""
+        # Cancel any running grace timer — real tool is starting
+        self._grace_timer.stop()
+
         tool_name = data.get('tool', 'unknown')
         tool_input = data.get('toolInput', {})
 
@@ -244,14 +259,16 @@ class StateManager(QObject):
 
     def _handle_post_tool_use(self, session: SessionState, data: dict):
         """Handle PostToolUse event."""
-        # Tool finished
+        # Tool finished — transition to "Thinking" state for the grace period
         if session.active_tool:
             self.tool_ended.emit(session.session_id, session.active_tool.tool_name)
-        session.active_tool = None
+        self._start_grace_period(session)
 
     def _handle_stop(self, session: SessionState):
         """Handle Stop event (Claude finished responding)."""
-        session.active_tool = None
+        if session.active_tool:
+            self.tool_ended.emit(session.session_id, session.active_tool.tool_name)
+        self._start_grace_period(session)
         session.is_active = False
 
     def _handle_session_start(self, session: SessionState, data: dict):
@@ -270,6 +287,39 @@ class StateManager(QObject):
     def _handle_user_prompt(self, session: SessionState, data: dict):
         """Handle UserPromptSubmit event."""
         session.is_active = True
+
+    def _start_grace_period(self, session: SessionState):
+        """Transition to 'Thinking' state for the grace period."""
+        # Pick a random fun verb from config
+        verb = random.choice(self._fun_verbs)
+
+        # Get thinking category info for color/pattern
+        thinking_state = self.config.states.get('thinking', {})
+        category_name = thinking_state.get('category', 'think')
+        category = self.config.categories.get(category_name, {})
+
+        session.active_tool = ActiveTool(
+            tool_name='_thinking',
+            display_name=verb,
+            category=category_name,
+            color=category.get('color', 'orange'),
+            pattern=category.get('pattern', 'cogitate'),
+        )
+
+        # Start (or restart) the grace timer
+        self._grace_session_id = session.session_id
+        self._grace_timer.start(self._grace_period_ms)
+
+    def _on_grace_expired(self):
+        """Grace period elapsed — clear the synthetic thinking state."""
+        if self._grace_session_id and self._grace_session_id in self.sessions:
+            session = self.sessions[self._grace_session_id]
+            # Only clear if still showing the synthetic thinking tool
+            if session.active_tool and session.active_tool.tool_name == '_thinking':
+                session.active_tool = None
+                self.session_updated.emit(session.session_id)
+                self.activity_changed.emit()
+        self._grace_session_id = None
 
     def _handle_pin_event(self, data: dict):
         """Handle session pin event."""
