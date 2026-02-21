@@ -1,6 +1,7 @@
 """
 Floating overlay window that displays Claude Code activity.
 Transparent, click-through window positioned at top-right of screen.
+Enhanced with glow effects, smooth transitions, particles, and accent borders.
 """
 
 import logging
@@ -9,8 +10,11 @@ import random
 import time
 from typing import List, Optional
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QProgressBar
-from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QGuiApplication
+from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import (
+    QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QGuiApplication,
+    QRadialGradient, QLinearGradient,
+)
 from state_manager import StateManager, SessionState
 
 logger = logging.getLogger(__name__)
@@ -19,24 +23,38 @@ logger = logging.getLogger(__name__)
 class ActivityIndicator(QWidget):
     """
     3x2 grid animation showing activity pattern.
-    Mimics the macOS version's semantic animations.
+    Enhanced with glow halos, smooth per-square opacity transitions,
+    gradient fills, drop shadows, specular highlights, and particles.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setFixedSize(120, 80)  # 3 cols x 2 rows, 40x40 squares
+        self.setFixedSize(140, 95)
 
         # Animation state
-        self.lit_squares = []  # List of indices (0-5) that are currently lit
+        self.lit_squares = []
         self.color = QColor(249, 115, 22)  # Default orange
         self.opacity_value = 0.8
         self.pattern_config = None
         self.sequence_index = 0
 
-        # Animation timer
+        # Smooth per-square opacity
+        self._square_opacities = [0.0] * 6
+        self._target_opacities = [0.0] * 6
+
+        # Particles (for random-mode patterns)
+        self._particles = []
+        self._particle_mode = False
+
+        # Animation timer (pattern step)
         self.animation_timer = QTimer()
         self.animation_timer.timeout.connect(self._animate_step)
+
+        # Smooth interpolation timer (~60fps)
+        self._lerp_timer = QTimer()
+        self._lerp_timer.timeout.connect(self._lerp_step)
+        self._lerp_timer.start(16)
 
     def set_pattern(self, pattern_name: str, color_rgb: tuple, config: dict,
                     speed_multiplier: float = 1.0, animations_enabled: bool = True,
@@ -63,11 +81,20 @@ class ActivityIndicator(QWidget):
         else:
             self.opacity_value = 0.8
 
+        # Enable particles for random-mode patterns
+        mode = config.get('mode', 'static')
+        self._particle_mode = (mode == 'random')
+
         if not animations_enabled:
-            # Show static first frame
+            # Show static first frame — set opacities instantly
             self.animation_timer.stop()
             sequence = config.get('sequence', [[]])
             self.lit_squares = sequence[0] if sequence else []
+            for i in range(6):
+                val = self.opacity_value if i in self.lit_squares else 0.0
+                self._square_opacities[i] = val
+                self._target_opacities[i] = val
+            self._particles.clear()
             self.update()
             return
 
@@ -83,9 +110,13 @@ class ActivityIndicator(QWidget):
         self.update()
 
     def stop_animation(self):
-        """Stop the animation."""
+        """Stop the animation with a smooth fade-out."""
         self.animation_timer.stop()
         self.lit_squares = []
+        self._particles.clear()
+        # Fade all squares to zero
+        for i in range(6):
+            self._target_opacities[i] = 0.0
         self.update()
 
     def _animate_step(self):
@@ -106,6 +137,9 @@ class ActivityIndicator(QWidget):
             lit_range = self.pattern_config.get('litRange', [2, 4])
             num_lit = random.randint(lit_range[0], lit_range[1])
             self.lit_squares = random.sample(range(6), num_lit)
+            # Emit particles for random modes
+            if self._particle_mode:
+                self._emit_particles(2)
 
         elif mode == 'breathe':
             # All squares pulse together via sinusoidal opacity
@@ -117,7 +151,74 @@ class ActivityIndicator(QWidget):
             sequence = self.pattern_config.get('sequence', [[]])
             self.lit_squares = sequence[0] if sequence else []
 
+        # Update target opacities for smooth transitions
+        for i in range(6):
+            if i in self.lit_squares:
+                self._target_opacities[i] = self.opacity_value
+            else:
+                self._target_opacities[i] = 0.0
+
         self.update()
+
+    def _lerp_step(self):
+        """Smoothly interpolate square opacities toward targets (~60fps)."""
+        changed = False
+        lerp_speed = 0.18
+
+        for i in range(6):
+            diff = self._target_opacities[i] - self._square_opacities[i]
+            if abs(diff) > 0.005:
+                self._square_opacities[i] += diff * lerp_speed
+                changed = True
+            elif self._square_opacities[i] != self._target_opacities[i]:
+                self._square_opacities[i] = self._target_opacities[i]
+                changed = True
+
+        # Update particles
+        if self._particles:
+            self._update_particles()
+            changed = True
+
+        if changed:
+            self.update()
+
+    def _emit_particles(self, count=2):
+        """Emit small particles from lit squares."""
+        if not self.lit_squares:
+            return
+        sources = random.sample(
+            self.lit_squares, min(2, len(self.lit_squares))
+        )
+        square_size = 30
+        gap = 5
+        margin = 10
+        for idx in sources:
+            row = idx // 3
+            col = idx % 3
+            cx = col * (square_size + gap) + margin + square_size / 2
+            cy = row * (square_size + gap) + margin + square_size / 2
+            for _ in range(count):
+                self._particles.append({
+                    'x': cx + random.uniform(-4, 4),
+                    'y': cy + random.uniform(-4, 4),
+                    'vx': random.uniform(-1.2, 1.2),
+                    'vy': random.uniform(-1.8, -0.3),
+                    'life': 1.0,
+                    'decay': random.uniform(0.025, 0.06),
+                    'size': random.uniform(1.0, 2.5),
+                })
+
+    def _update_particles(self):
+        """Update particle positions and lifetimes."""
+        alive = []
+        for p in self._particles:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['vy'] -= 0.02  # slight upward drift
+            p['life'] -= p['decay']
+            if p['life'] > 0:
+                alive.append(p)
+        self._particles = alive[:40]  # cap count
 
     def set_opacity(self, value: float):
         """Set opacity value (0.0 - 1.0)."""
@@ -125,44 +226,144 @@ class ActivityIndicator(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        """Paint the 3x2 grid."""
+        """Paint the 3x2 grid with glow, gradients, shadows, and particles."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Draw 6 squares (3x2 grid)
-        square_size = 35
+        square_size = 30
         gap = 5
+        margin = 10
 
         for i in range(6):
             row = i // 3
             col = i % 3
 
-            x = col * (square_size + gap) + gap
-            y = row * (square_size + gap) + gap
+            x = col * (square_size + gap) + margin
+            y = row * (square_size + gap) + margin
+            center_x = x + square_size / 2
+            center_y = y + square_size / 2
 
-            # Determine if this square is lit
-            is_lit = i in self.lit_squares
+            sq_opacity = self._square_opacities[i]
 
-            if is_lit:
-                # Lit square
-                color = QColor(self.color)
-                color.setAlphaF(self.opacity_value)
-                painter.setBrush(QBrush(color))
+            if sq_opacity > 0.03:
+                # --- Glow halo (radial gradient behind square) ---
+                glow_radius = square_size * 0.85
+                glow = QRadialGradient(center_x, center_y, glow_radius)
+                glow_inner = QColor(self.color)
+                glow_inner.setAlphaF(sq_opacity * 0.25)
+                glow_outer = QColor(self.color)
+                glow_outer.setAlphaF(0.0)
+                glow.setColorAt(0.0, glow_inner)
+                glow.setColorAt(0.6, glow_inner)
+                glow.setColorAt(1.0, glow_outer)
+                painter.setBrush(QBrush(glow))
                 painter.setPen(Qt.NoPen)
+                painter.drawEllipse(
+                    QPointF(center_x, center_y), glow_radius, glow_radius
+                )
+
+                # --- Drop shadow ---
+                shadow = QColor(0, 0, 0, int(60 * sq_opacity))
+                painter.setBrush(QBrush(shadow))
+                painter.drawRoundedRect(
+                    int(x + 2), int(y + 2), square_size, square_size, 5, 5
+                )
+
+                # --- Lit square (linear gradient fill) ---
+                sq_grad = QLinearGradient(x, y, x, y + square_size)
+                top_color = QColor(self.color)
+                top_color.setAlphaF(sq_opacity)
+                bot_color = QColor(self.color).darker(140)
+                bot_color.setAlphaF(sq_opacity * 0.75)
+                sq_grad.setColorAt(0.0, top_color)
+                sq_grad.setColorAt(1.0, bot_color)
+                painter.setBrush(QBrush(sq_grad))
+                painter.drawRoundedRect(x, y, square_size, square_size, 5, 5)
+
+                # --- Specular highlight (top half gloss) ---
+                hl_grad = QLinearGradient(x, y, x, y + square_size * 0.5)
+                hl_top = QColor(255, 255, 255, int(40 * sq_opacity))
+                hl_bot = QColor(255, 255, 255, 0)
+                hl_grad.setColorAt(0.0, hl_top)
+                hl_grad.setColorAt(1.0, hl_bot)
+                painter.setBrush(QBrush(hl_grad))
+                painter.drawRoundedRect(
+                    x + 2, y + 1,
+                    square_size - 4, int(square_size * 0.45),
+                    3, 3,
+                )
             else:
-                # Dim square
-                color = QColor(100, 100, 100, int(50 * self.opacity_value))
-                painter.setBrush(QBrush(color))
+                # --- Dim square ---
+                dim = QColor(80, 80, 85, int(35 * self.opacity_value))
+                painter.setBrush(QBrush(dim))
                 painter.setPen(Qt.NoPen)
+                painter.drawRoundedRect(x, y, square_size, square_size, 5, 5)
 
-            # Draw rounded square
-            painter.drawRoundedRect(x, y, square_size, square_size, 4, 4)
+        # --- Particles ---
+        for p in self._particles:
+            p_color = QColor(self.color)
+            p_color.setAlphaF(max(0.0, min(1.0, p['life'] * 0.5)))
+            painter.setBrush(QBrush(p_color))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QPointF(p['x'], p['y']), p['size'], p['size'])
+
+
+class ContextRing(QWidget):
+    """Circular arc indicator for context window usage."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(36, 36)
+        self._percent = 0
+        self._color = QColor(34, 197, 94)
+
+    def set_percent(self, percent: int):
+        self._percent = max(0, min(100, percent))
+        if percent >= 80:
+            self._color = QColor(239, 68, 68)   # red
+        elif percent >= 50:
+            self._color = QColor(245, 158, 11)  # amber
+        else:
+            self._color = QColor(34, 197, 94)   # green
+        self.update()
+
+    def paintEvent(self, event):
+        if self._percent <= 0:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        size = min(self.width(), self.height())
+        margin = 4
+        rect = QRectF(margin, margin, size - 2 * margin, size - 2 * margin)
+
+        # Background ring
+        bg_pen = QPen(QColor(255, 255, 255, 25), 2.5)
+        bg_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(bg_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(rect)
+
+        # Foreground arc
+        fg_pen = QPen(self._color, 2.5)
+        fg_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(fg_pen)
+        span_angle = int(-self._percent * 360 / 100 * 16)
+        painter.drawArc(rect, 90 * 16, span_angle)
+
+        # Percentage text
+        painter.setPen(QColor(255, 255, 255, 160))
+        font = QFont()
+        font.setPixelSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter, f"{self._percent}")
 
 
 class SessionCard(QWidget):
     """
     Card displaying a single session's activity.
-    Shows project name, tool status, and activity indicator.
+    Shows project name, tool status, activity indicator, and context ring.
     """
 
     def __init__(self, session: SessionState, config, user_settings=None, parent=None):
@@ -204,18 +405,13 @@ class SessionCard(QWidget):
         self.context_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 11px;")
         text_layout.addWidget(self.context_label)
 
-        # Context progress bar
-        self.context_bar = QProgressBar()
-        self.context_bar.setRange(0, 100)
-        self.context_bar.setValue(0)
-        self.context_bar.setFixedHeight(6)
-        self.context_bar.setTextVisible(False)
-        self.context_bar.setVisible(False)
-        self._update_context_bar_color(0)
-        text_layout.addWidget(self.context_bar)
-
         layout.addLayout(text_layout)
         layout.addStretch()
+
+        # Context ring (far right)
+        self.context_ring = ContextRing()
+        self.context_ring.setVisible(False)
+        layout.addWidget(self.context_ring)
 
         # Update animation
         self.update_animation()
@@ -233,26 +429,6 @@ class SessionCard(QWidget):
         if self.session.context_percent > 0:
             return f"Context: {self.session.context_percent:.1f}%"
         return ""
-
-    def _update_context_bar_color(self, percent: int):
-        """Set progress bar color based on usage thresholds."""
-        if percent >= 80:
-            color = "#EF4444"  # red
-        elif percent >= 50:
-            color = "#F59E0B"  # amber
-        else:
-            color = "#22C55E"  # green
-        self.context_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background: rgba(255, 255, 255, 0.1);
-                border: none;
-                border-radius: 3px;
-            }}
-            QProgressBar::chunk {{
-                background: {color};
-                border-radius: 3px;
-            }}
-        """)
 
     def update_animation(self):
         """Update animation based on current session state."""
@@ -305,9 +481,8 @@ class SessionCard(QWidget):
         self.status_label.setText(self._get_status_text())
         self.context_label.setText(self._get_context_text())
         percent = int(self.session.context_percent)
-        self.context_bar.setValue(percent)
-        self.context_bar.setVisible(percent > 0)
-        self._update_context_bar_color(percent)
+        self.context_ring.set_percent(percent)
+        self.context_ring.setVisible(percent > 0)
         self.update_animation()
 
 
@@ -315,6 +490,7 @@ class ClaudeNotchOverlay(QWidget):
     """
     Main overlay window.
     Transparent, frameless window showing Claude activity.
+    Enhanced with colored accent border reflecting the active tool.
     """
 
     def __init__(self, state_manager: StateManager, user_settings=None, parent=None):
@@ -326,6 +502,7 @@ class ClaudeNotchOverlay(QWidget):
         self.session_cards = {}  # session_id -> SessionCard
         self._user_dragged = False  # True after user drags overlay
         self._is_fading_out = False  # Guard against show during hide cleanup
+        self._accent_color = None   # Current border accent color
 
         # Window flags for overlay
         self.setWindowFlags(
@@ -407,6 +584,20 @@ class ClaudeNotchOverlay(QWidget):
         """Handle session update."""
         self._update_sessions()
 
+    def _update_accent_color(self):
+        """Determine accent color from the most active session's tool."""
+        for card in self.session_cards.values():
+            if card.session.active_tool:
+                color_rgb = self.config.get_color_rgb(card.session.active_tool.color)
+                new_color = QColor(*color_rgb)
+                if self._accent_color != new_color:
+                    self._accent_color = new_color
+                    self.update()  # repaint border accent
+                return
+        if self._accent_color is not None:
+            self._accent_color = None
+            self.update()
+
     def _update_sessions(self):
         """Update session cards based on current state."""
         # Get sessions to display
@@ -431,6 +622,9 @@ class ClaudeNotchOverlay(QWidget):
                 card = SessionCard(session, self.config, user_settings=self.user_settings)
                 self.session_cards[session.session_id] = card
                 self.layout.addWidget(card)
+
+        # Update accent color
+        self._update_accent_color()
 
         # Show/hide window based on activity and auto_hide setting
         auto_hide = True
@@ -462,9 +656,10 @@ class ClaudeNotchOverlay(QWidget):
         # Update all session cards
         for card in self.session_cards.values():
             card.update_display()
+        self._update_accent_color()
 
     def paintEvent(self, event):
-        """Paint semi-transparent background."""
+        """Paint semi-transparent background with colored accent border."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
@@ -479,6 +674,39 @@ class ClaudeNotchOverlay(QWidget):
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height(), 15, 15)
         painter.drawPath(path)
+
+        # --- Border accent (colored line at top, reflecting active tool) ---
+        if self._accent_color:
+            painter.setClipPath(path)
+
+            # Gradient accent line that fades at the edges
+            accent_grad = QLinearGradient(0, 0, self.width(), 0)
+            ac_transparent = QColor(self._accent_color)
+            ac_transparent.setAlphaF(0.0)
+            ac_solid = QColor(self._accent_color)
+            ac_solid.setAlphaF(0.7)
+            accent_grad.setColorAt(0.0, ac_transparent)
+            accent_grad.setColorAt(0.15, ac_solid)
+            accent_grad.setColorAt(0.85, ac_solid)
+            accent_grad.setColorAt(1.0, ac_transparent)
+
+            painter.setPen(QPen(QBrush(accent_grad), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawLine(QPointF(0, 1), QPointF(self.width(), 1))
+
+            # Soft glow bleed below the accent line
+            glow_grad = QLinearGradient(0, 0, 0, 10)
+            g_top = QColor(self._accent_color)
+            g_top.setAlphaF(0.12)
+            g_bot = QColor(self._accent_color)
+            g_bot.setAlphaF(0.0)
+            glow_grad.setColorAt(0, g_top)
+            glow_grad.setColorAt(1, g_bot)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(glow_grad))
+            painter.drawRect(QRectF(0, 0, self.width(), 10))
+
+            painter.setClipping(False)
 
     def _animated_show(self):
         """Show overlay with fade-in animation."""
