@@ -17,7 +17,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 
 | Feature | What it does | Effort | Status | Review Notes |
 |---------|-------------|--------|--------|-------------|
-| Session statistics | Track tool usage counts, time per category, persist to JSON | Medium | READY | Scoped v1: aggregate counters + coarse category time. Bounded retention, schema versioning, atomic writes. No raw event timelines |
+| Session statistics | Track tool usage counts, time per category, persist to JSON | Medium | DONE | Shipped: SessionStats module with schema v1, atomic writes, 90-day retention. StateManager records on PostToolUse (excludes _thinking). Stats tab in Settings shows top 10 tools, category time, session count. 11 tests |
 | Token estimation | Display estimated token usage | Medium | SKIP | Already implemented: _update_token_usage parses transcript, ContextRing shows usage arc. Only hardening needed (formula docs, parser robustness tests) |
 
 ## System Integration
@@ -47,7 +47,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 3. ~~Per-project colors~~ DONE
 4. ~~Timeline strip~~ DONE
 5. ~~Mini mode~~ DONE
-6. Session statistics (Medium, extends existing tracking)
+6. ~~Session statistics~~ DONE
 7. ~~Desktop toasts~~ DONE
 8. Theme presets (Medium, quality-of-life)
 9. Click-to-focus (Medium, high complexity/reliability risk)
