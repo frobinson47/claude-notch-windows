@@ -186,6 +186,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_notifications_tab(), "Notifications")
         self.tabs.addTab(self._build_hooks_tab(), "Hooks")
         self.tabs.addTab(self._build_animations_tab(), "Animations")
+        self.tabs.addTab(self._build_stats_tab(), "Stats")
         root.addWidget(self.tabs, 1)
 
         root.addSpacing(10)
@@ -467,6 +468,85 @@ class SettingsDialog(QDialog):
         speed_layout.addWidget(self.speed_label)
         form.addRow("Speed multiplier:", speed_layout)
 
+        return page
+
+    def _build_stats_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
+
+        # Load stats
+        from session_stats import SessionStats
+        stats = SessionStats()
+        data = stats.get_stats()
+
+        # Summary group
+        summary_group = QGroupBox("Summary")
+        summary_form = QFormLayout(summary_group)
+        summary_form.addRow("Sessions tracked:", QLabel(str(data.get("session_count", 0))))
+        summary_form.addRow("Total tool uses:", QLabel(str(data.get("total_tool_uses", 0))))
+
+        first = data.get("first_recorded")
+        if first and first > 0:
+            from datetime import datetime
+            since_str = datetime.fromtimestamp(first).strftime("%Y-%m-%d")
+            summary_form.addRow("Tracking since:", QLabel(since_str))
+        layout.addWidget(summary_group)
+
+        # Tool counts group (top 10)
+        tool_group = QGroupBox("Tool Usage (top 10)")
+        tool_layout = QVBoxLayout(tool_group)
+        tool_counts = data.get("tool_counts", {})
+        sorted_tools = sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        if sorted_tools:
+            for tool_name, count in sorted_tools:
+                row = QHBoxLayout()
+                name_label = QLabel(tool_name)
+                name_label.setStyleSheet("color: #ddd; font-size: 12px;")
+                count_label = QLabel(str(count))
+                count_label.setStyleSheet("color: #4a9eff; font-size: 12px; font-weight: bold;")
+                count_label.setAlignment(Qt.AlignRight)
+                row.addWidget(name_label)
+                row.addStretch()
+                row.addWidget(count_label)
+                tool_layout.addLayout(row)
+        else:
+            empty = QLabel("No data yet")
+            empty.setStyleSheet("color: #888; font-size: 12px;")
+            tool_layout.addWidget(empty)
+        layout.addWidget(tool_group)
+
+        # Category time group
+        cat_group = QGroupBox("Time by Category")
+        cat_layout = QVBoxLayout(cat_group)
+        cat_seconds = data.get("category_seconds", {})
+        sorted_cats = sorted(cat_seconds.items(), key=lambda x: x[1], reverse=True)
+        if sorted_cats:
+            for cat_name, seconds in sorted_cats:
+                row = QHBoxLayout()
+                name_label = QLabel(cat_name.title())
+                name_label.setStyleSheet("color: #ddd; font-size: 12px;")
+                if seconds >= 3600:
+                    time_str = f"{seconds/3600:.1f}h"
+                elif seconds >= 60:
+                    time_str = f"{seconds/60:.1f}m"
+                else:
+                    time_str = f"{seconds:.0f}s"
+                time_label = QLabel(time_str)
+                time_label.setStyleSheet("color: #4a9eff; font-size: 12px; font-weight: bold;")
+                time_label.setAlignment(Qt.AlignRight)
+                row.addWidget(name_label)
+                row.addStretch()
+                row.addWidget(time_label)
+                cat_layout.addLayout(row)
+        else:
+            empty = QLabel("No data yet")
+            empty.setStyleSheet("color: #888; font-size: 12px;")
+            cat_layout.addWidget(empty)
+        layout.addWidget(cat_group)
+
+        layout.addStretch()
         return page
 
     # ── Callbacks ────────────────────────────────────────────────

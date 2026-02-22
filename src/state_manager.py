@@ -194,6 +194,9 @@ class StateManager(QObject):
         thinking_state = self.config.states.get('thinking', {})
         self._fun_verbs = thinking_state.get('funVerbs', ['Thinking'])
 
+        from session_stats import SessionStats
+        self.session_stats = SessionStats()
+
     def handle_event(self, event_type: str, data: dict):
         """
         Handle hook event from Claude Code.
@@ -298,6 +301,15 @@ class StateManager(QObject):
         if tool_name == 'Bash':
             self._check_bash_error(session, data)
 
+        # Record tool usage stats (exclude synthetic _thinking tool)
+        if session.active_tool and session.active_tool.tool_name != '_thinking':
+            elapsed = time.time() - session.active_tool.started_at
+            self.session_stats.record_tool_use(
+                session.active_tool.tool_name,
+                session.active_tool.category,
+                elapsed
+            )
+
         self._start_grace_period(session)
 
     def _handle_stop(self, session: SessionState):
@@ -316,6 +328,7 @@ class StateManager(QObject):
         """Handle SessionEnd event."""
         session.is_active = False
         self.session_ended.emit(session.session_id)
+        self.session_stats.increment_session_count()
 
         # Remove session after a delay (keep it visible for a bit)
         # In production, you might want to use a timer for this
