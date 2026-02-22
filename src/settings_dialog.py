@@ -182,6 +182,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_behavior_tab(), "Behavior")
         self.tabs.addTab(self._build_overlay_tab(), "Overlay")
         self.tabs.addTab(self._build_tray_tab(), "Tray")
+        self.tabs.addTab(self._build_notifications_tab(), "Notifications")
         self.tabs.addTab(self._build_hooks_tab(), "Hooks")
         self.tabs.addTab(self._build_animations_tab(), "Animations")
         root.addWidget(self.tabs, 1)
@@ -298,6 +299,37 @@ class SettingsDialog(QDialog):
         self.letter_cb.setChecked(self.user_settings.get("show_category_letter"))
         self.letter_cb.toggled.connect(lambda v: self.user_settings.set("show_category_letter", v))
         form.addRow("", self.letter_cb)
+
+        return page
+
+    def _build_notifications_tab(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(16, 16, 16, 16)
+        form.setSpacing(14)
+
+        # Sound cues
+        self.sounds_cb = QCheckBox("Enable sound cues")
+        self.sounds_cb.setChecked(self.user_settings.get("sounds_enabled"))
+        self.sounds_cb.toggled.connect(lambda v: self.user_settings.set("sounds_enabled", v))
+        form.addRow("", self.sounds_cb)
+
+        # Error flash
+        self.error_flash_cb = QCheckBox("Enable error flash")
+        self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
+        self.error_flash_cb.toggled.connect(lambda v: self.user_settings.set("error_flash_enabled", v))
+        form.addRow("", self.error_flash_cb)
+
+        # Info label
+        info = QLabel(
+            "Sound cues play for:\n"
+            "  - Errors (Bash failures)\n"
+            "  - Attention needed (user questions)\n"
+            "  - Session end"
+        )
+        info.setStyleSheet("color: #888; font-size: 11px;")
+        info.setWordWrap(True)
+        form.addRow("", info)
 
         return page
 
@@ -437,6 +469,8 @@ class SettingsDialog(QDialog):
         self.letter_cb.setChecked(self.user_settings.get("show_category_letter"))
         self.anim_cb.setChecked(self.user_settings.get("animations_enabled"))
         self.speed_slider.setValue(int(self.user_settings.get("animation_speed_multiplier") * 100))
+        self.sounds_cb.setChecked(self.user_settings.get("sounds_enabled"))
+        self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
 
     # ── Painting & drag ──────────────────────────────────────────
 

@@ -169,6 +169,8 @@ class StateManager(QObject):
     tool_ended = Signal(str, str)  # session_id, tool_name
     activity_changed = Signal()  # General activity change
     notification_received = Signal(str, str)  # session_id, message
+    error_detected = Signal(str, str)  # session_id, tool_name
+    attention_needed = Signal(str)  # session_id
 
     def __init__(self, config: Optional[NotchConfig] = None, user_settings=None):
         """Initialize state manager."""
@@ -258,6 +260,10 @@ class StateManager(QObject):
         tool_name = data.get('tool', 'unknown')
         tool_input = data.get('toolInput', {})
 
+        # Detect attention-needed events
+        if tool_name == 'AskUserQuestion':
+            self.attention_needed.emit(session.session_id)
+
         # Get tool info from config
         tool_info = self.config.get_tool_info(tool_name)
 
@@ -284,8 +290,14 @@ class StateManager(QObject):
     def _handle_post_tool_use(self, session: SessionState, data: dict):
         """Handle PostToolUse event."""
         # Tool finished — transition to "Thinking" state for the grace period
+        tool_name = data.get('tool', '')
         if session.active_tool:
             self.tool_ended.emit(session.session_id, session.active_tool.tool_name)
+
+        # Detect errors in Bash tool results
+        if tool_name == 'Bash':
+            self._check_bash_error(session, data)
+
         self._start_grace_period(session)
 
     def _handle_stop(self, session: SessionState):
@@ -321,6 +333,45 @@ class StateManager(QObject):
             message = str(tool_input) if tool_input else ''
         if message:
             self.notification_received.emit(session.session_id, message)
+
+    # Heuristic error patterns — only checked in stderr, not stdout,
+    # to reduce false positives from commands that mention "error" in normal output.
+    _STDERR_ERROR_PATTERNS = (
+        'command not found',
+        'No such file or directory',
+        'Permission denied',
+        'Traceback (most recent call last)',
+    )
+
+    def _check_bash_error(self, session: SessionState, data: dict):
+        """Check Bash tool result for error indicators.
+
+        Priority: structured exit code first, then stderr heuristics as fallback.
+        Stdout is NOT scanned to avoid false positives from tools that print
+        the word "error" in normal output (e.g. grep, test runners).
+        """
+        try:
+            tool_result = data.get('toolResult')
+            if not tool_result:
+                return
+
+            # Structured dict with exitCode — authoritative signal
+            if isinstance(tool_result, dict):
+                exit_code = tool_result.get('exitCode')
+                if exit_code is not None and exit_code != 0:
+                    self.error_detected.emit(session.session_id, 'Bash')
+                    return
+                # If exit code is 0 or absent, check stderr only as fallback
+                stderr = tool_result.get('stderr', '')
+                if stderr:
+                    for pattern in self._STDERR_ERROR_PATTERNS:
+                        if pattern in stderr:
+                            self.error_detected.emit(session.session_id, 'Bash')
+                            return
+            # String result — no structured exit code available; skip heuristics
+            # to avoid false positives on unstructured output.
+        except Exception as e:
+            logger.debug(f"Error checking bash result: {e}")
 
     def _start_grace_period(self, session: SessionState):
         """Transition to 'Thinking' state for the grace period."""

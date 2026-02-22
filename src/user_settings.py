@@ -25,6 +25,8 @@ DEFAULTS = {
     "show_category_letter": True,
     "animation_speed_multiplier": 1.0,
     "animations_enabled": True,
+    "sounds_enabled": True,
+    "error_flash_enabled": True,
 }
 
 # Validation ranges for numeric settings

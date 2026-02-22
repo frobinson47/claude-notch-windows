@@ -10,7 +10,7 @@ import random
 import time
 from typing import List, Optional
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QProgressBar
-from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QPropertyAnimation, QEasingCurve, Property
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QGuiApplication,
     QRadialGradient, QLinearGradient,
@@ -372,6 +372,8 @@ class SessionCard(QWidget):
         self.session = session
         self.config = config
         self.user_settings = user_settings
+        self._flash_opacity = 0.0
+        self._flash_animation = None
 
         # Setup UI
         self._setup_ui()
@@ -475,6 +477,41 @@ class SessionCard(QWidget):
                 attention_config=idle_attention,
             )
 
+    def flash_error(self):
+        """Trigger a red error flash that fades out over 1.5s."""
+        self._flash_opacity = 0.45
+        if self._flash_animation is None:
+            self._flash_animation = QPropertyAnimation(self, b"flash_opacity_prop")
+        self._flash_animation.stop()
+        self._flash_animation.setDuration(1500)
+        self._flash_animation.setStartValue(0.45)
+        self._flash_animation.setEndValue(0.0)
+        self._flash_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._flash_animation.start()
+
+    def _get_flash_opacity(self):
+        return self._flash_opacity
+
+    def _set_flash_opacity(self, value):
+        self._flash_opacity = value
+        self.update()
+
+    flash_opacity_prop = Property(float, _get_flash_opacity, _set_flash_opacity)
+
+    def paintEvent(self, event):
+        """Paint error flash overlay if active."""
+        super().paintEvent(event)
+        if self._flash_opacity > 0.01:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            red = QColor(239, 68, 68)
+            red.setAlphaF(self._flash_opacity)
+            painter.setBrush(QBrush(red))
+            painter.setPen(Qt.NoPen)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(0, 0, self.width(), self.height()), 8, 8)
+            painter.drawPath(path)
+
     def update_display(self):
         """Update display labels."""
         self.project_label.setText(self.session.display_name)
@@ -493,12 +530,14 @@ class ClaudeNotchOverlay(QWidget):
     Enhanced with colored accent border reflecting the active tool.
     """
 
-    def __init__(self, state_manager: StateManager, user_settings=None, parent=None):
+    def __init__(self, state_manager: StateManager, user_settings=None,
+                 notification_manager=None, parent=None):
         super().__init__(parent)
 
         self.state_manager = state_manager
         self.config = state_manager.config
         self.user_settings = user_settings
+        self.notification_manager = notification_manager
         self.session_cards = {}  # session_id -> SessionCard
         self._user_dragged = False  # True after user drags overlay
         self._is_fading_out = False  # Guard against show during hide cleanup
@@ -522,6 +561,10 @@ class ClaudeNotchOverlay(QWidget):
         # Connect signals
         self.state_manager.activity_changed.connect(self._on_activity_changed)
         self.state_manager.session_updated.connect(self._on_session_updated)
+
+        # Connect notification manager for error flashes
+        if self.notification_manager:
+            self.notification_manager.error_flash.connect(self._on_error_flash)
 
         # Connect user settings
         if self.user_settings:
@@ -583,6 +626,12 @@ class ClaudeNotchOverlay(QWidget):
     def _on_session_updated(self, session_id: str):
         """Handle session update."""
         self._update_sessions()
+
+    def _on_error_flash(self, session_id: str):
+        """Trigger red flash on the matching session card."""
+        card = self.session_cards.get(session_id)
+        if card:
+            card.flash_error()
 
     def _update_accent_color(self):
         """Determine accent color from the most active session's tool."""

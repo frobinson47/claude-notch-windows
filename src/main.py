@@ -17,6 +17,7 @@ from state_manager import StateManager, NotchConfig
 from user_settings import UserSettings
 from tray_icon import ClaudeNotchTray
 from overlay_window import ClaudeNotchOverlay
+from notification_manager import NotificationManager
 
 
 # Setup logging
@@ -108,8 +109,17 @@ class ClaudeNotchApp:
             self.logger.error(f"Failed to start server: {e}")
             sys.exit(1)
 
+        # Create notification manager (sound cues + error flash)
+        self.notification_manager = NotificationManager(
+            self.state_manager, self.user_settings
+        )
+        self.logger.info("Notification manager created")
+
         # Create overlay window (but don't show yet)
-        self.overlay = ClaudeNotchOverlay(self.state_manager, user_settings=self.user_settings)
+        self.overlay = ClaudeNotchOverlay(
+            self.state_manager, user_settings=self.user_settings,
+            notification_manager=self.notification_manager,
+        )
         self.logger.info("Overlay window created")
 
         # Create system tray icon
