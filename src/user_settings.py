@@ -33,6 +33,7 @@ DEFAULTS = {
     "toasts_enabled": True,        # F3: desktop toast notifications
     "mini_mode": False,             # Compact single-line session cards
     "theme": "dark",
+    "click_to_focus": False,        # Click session card to focus terminal
 }
 
 # Validation ranges for numeric settings

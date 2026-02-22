@@ -26,7 +26,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 |---------|-------------|--------|--------|-------------|
 | Auto-start on boot | Add/remove Windows startup registry entry from settings | Small | DONE | Already shipped in UserSettings + SettingsDialog |
 | Global hotkey | Toggle overlay visibility with configurable shortcut | Small | DONE | Shipped: Win32 RegisterHotKey via ctypes, daemon GetMessage thread, Signal bridge. Default Ctrl+Shift+N, configurable in Settings > Behavior. Non-fatal on failure |
-| Click-to-focus | Click a session card to bring that terminal to foreground | Medium | READY | Constrained v1: explicit HWND/PID binding at session start, not title heuristics. Accept SetForegroundWindow limitations. Ship behind feature flag |
+| Click-to-focus | Click a session card to bring that terminal to foreground | Medium | DONE | Shipped: window_focus.py with Win32 ctypes (EnumWindows, CreateToolhelp32Snapshot, SetForegroundWindow). Hook sends os.getppid() PID, StateManager captures HWND on SessionStart. Cards show pointing cursor + mouseReleaseEvent. click_to_focus toggle in Settings > Behavior. 10 tests |
 | Multi-monitor | Settings dropdown to pick which display | Small | DONE | Shipped: target_monitor setting, QComboBox populated from QGuiApplication.screens(), fallback to primary on unplug/invalid name |
 
 ## Visual & Customization
@@ -50,7 +50,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 6. ~~Session statistics~~ DONE
 7. ~~Desktop toasts~~ DONE
 8. ~~Theme presets~~ DONE
-9. Click-to-focus (Medium, high complexity/reliability risk)
+9. ~~Click-to-focus~~ DONE
 10. Discord/Slack webhook (Medium, security/async complexity)
 
 All features received CONDITIONAL GO from Codex architecture review (2026-02-21).

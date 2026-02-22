@@ -586,6 +586,15 @@ class SessionCard(QWidget):
 
     flash_opacity_prop = Property(float, _get_flash_opacity, _set_flash_opacity)
 
+    def mouseReleaseEvent(self, event):
+        """Click to focus the terminal window."""
+        if event.button() == Qt.LeftButton and self.session.terminal_hwnd:
+            from window_focus import focus_window
+            focus_window(self.session.terminal_hwnd)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
     def paintEvent(self, event):
         """Paint error flash overlay if active."""
         super().paintEvent(event)
@@ -615,6 +624,12 @@ class SessionCard(QWidget):
 
         # Update timeline strip
         self.timeline_strip.set_tools(self.session.recent_tools, self.config)
+
+        # Click-to-focus cursor hint
+        if self.session.terminal_hwnd:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.unsetCursor()
 
 
 class MiniSessionCard(QWidget):
@@ -678,6 +693,15 @@ class MiniSessionCard(QWidget):
         self._dot.color = self._get_dot_color()
         self._dot.update()
 
+    def mouseReleaseEvent(self, event):
+        """Click to focus the terminal window."""
+        if event.button() == Qt.LeftButton and self.session.terminal_hwnd:
+            from window_focus import focus_window
+            focus_window(self.session.terminal_hwnd)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
     def update_display(self):
         self._project_label.setText(self.session.display_name)
         self._project_label.setStyleSheet(
@@ -688,6 +712,11 @@ class MiniSessionCard(QWidget):
             f"color: {self.theme_colors['text_muted_css']}; font-size: 11px;"
         )
         self._update_dot_color()
+
+        if self.session.terminal_hwnd:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.unsetCursor()
 
     def update_animation(self):
         """No-op — mini mode has no animations."""

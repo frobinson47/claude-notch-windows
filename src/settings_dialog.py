@@ -144,6 +144,19 @@ class SettingsDialog(QDialog):
         hotkey_layout.addWidget(hotkey_note)
         form.addRow("Global hotkey:", hotkey_layout)
 
+        # Click-to-focus
+        self.click_focus_cb = QCheckBox("Click session card to focus terminal")
+        self.click_focus_cb.setChecked(self.user_settings.get("click_to_focus"))
+        self.click_focus_cb.toggled.connect(lambda v: self.user_settings.set("click_to_focus", v))
+        click_focus_note = QLabel("When enabled, clicking a session card brings its terminal to the foreground")
+        click_focus_note.setStyleSheet("color: #888; font-size: 11px;")
+        click_focus_note.setWordWrap(True)
+        click_layout = QVBoxLayout()
+        click_layout.setSpacing(2)
+        click_layout.addWidget(self.click_focus_cb)
+        click_layout.addWidget(click_focus_note)
+        form.addRow("", click_layout)
+
         return page
 
     def _build_overlay_tab(self) -> QWidget:
@@ -558,6 +571,7 @@ class SettingsDialog(QDialog):
         self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
         self.toasts_cb.setChecked(self.user_settings.get("toasts_enabled"))
         self.mini_mode_cb.setChecked(self.user_settings.get("mini_mode"))
+        self.click_focus_cb.setChecked(self.user_settings.get("click_to_focus"))
         theme_idx = next((i for i, n in enumerate(get_theme_names()) if n == self.user_settings.get("theme")), 0)
         self.theme_combo.setCurrentIndex(theme_idx)
         self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))

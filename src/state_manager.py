@@ -63,6 +63,7 @@ class SessionState:
     token_stats: TokenStats = field(default_factory=TokenStats)
     context_percent: float = 0.0
     context_tokens: int = 0
+    terminal_hwnd: Optional[int] = None
 
     @property
     def display_name(self) -> str:
@@ -323,6 +324,15 @@ class StateManager(QObject):
         """Handle SessionStart event."""
         session.start_time = time.time()
         session.is_active = True
+
+        # Capture terminal HWND for click-to-focus
+        pid = data.get('pid')
+        if pid and self.user_settings and self.user_settings.get('click_to_focus'):
+            try:
+                from window_focus import find_terminal_hwnd
+                session.terminal_hwnd = find_terminal_hwnd(pid)
+            except Exception:
+                pass
 
     def _handle_session_end(self, session: SessionState):
         """Handle SessionEnd event."""
