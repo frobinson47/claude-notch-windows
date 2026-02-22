@@ -308,6 +308,68 @@ class ActivityIndicator(QWidget):
             painter.drawEllipse(QPointF(p['x'], p['y']), p['size'], p['size'])
 
 
+class TimelineStrip(QWidget):
+    """
+    Thin color bar showing recent tool history as colored segments.
+    Coalesces consecutive same-category entries. Newest on the left.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(8)
+        self._segments = []  # list of (QColor, weight)
+
+    def set_tools(self, recent_tools: list, config):
+        """Build coalesced segments from recent_tools list.
+
+        Args:
+            recent_tools: List of ActiveTool (newest first).
+            config: NotchConfig for color lookup.
+        """
+        if not recent_tools:
+            self._segments = []
+            self.setVisible(False)
+            return
+
+        segments = []
+        prev_category = None
+        for tool in recent_tools:
+            if tool.category == prev_category and segments:
+                # Coalesce: increment weight of last segment
+                color, weight = segments[-1]
+                segments[-1] = (color, weight + 1)
+            else:
+                rgb = config.get_color_rgb(tool.color)
+                segments.append((QColor(*rgb), 1))
+                prev_category = tool.category
+
+        self._segments = segments
+        self.setVisible(True)
+        self.update()
+
+    def paintEvent(self, event):
+        if not self._segments:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        total_weight = sum(w for _, w in self._segments)
+        gap = 1
+        total_gaps = (len(self._segments) - 1) * gap
+        available = self.width() - total_gaps
+
+        x = 0.0
+        for i, (color, weight) in enumerate(self._segments):
+            seg_width = max(1.0, (weight / total_weight) * available)
+            c = QColor(color)
+            c.setAlphaF(0.7)
+            painter.setBrush(QBrush(c))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(QRectF(x, 0, seg_width, self.height()), 2, 2)
+            x += seg_width + gap
+
+
 class ContextRing(QWidget):
     """Circular arc indicator for context window usage."""
 
@@ -380,13 +442,17 @@ class SessionCard(QWidget):
 
     def _setup_ui(self):
         """Setup the UI layout."""
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(15)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(15, 10, 15, 10)
+        outer.setSpacing(6)
+
+        # Top row: activity indicator + text + context ring
+        top_row = QHBoxLayout()
+        top_row.setSpacing(15)
 
         # Activity indicator
         self.activity_indicator = ActivityIndicator()
-        layout.addWidget(self.activity_indicator)
+        top_row.addWidget(self.activity_indicator)
 
         # Text info
         text_layout = QVBoxLayout()
@@ -407,13 +473,20 @@ class SessionCard(QWidget):
         self.context_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 11px;")
         text_layout.addWidget(self.context_label)
 
-        layout.addLayout(text_layout)
-        layout.addStretch()
+        top_row.addLayout(text_layout)
+        top_row.addStretch()
 
         # Context ring (far right)
         self.context_ring = ContextRing()
         self.context_ring.setVisible(False)
-        layout.addWidget(self.context_ring)
+        top_row.addWidget(self.context_ring)
+
+        outer.addLayout(top_row)
+
+        # Bottom row: timeline strip
+        self.timeline_strip = TimelineStrip()
+        self.timeline_strip.setVisible(False)
+        outer.addWidget(self.timeline_strip)
 
         # Update animation
         self.update_animation()
@@ -534,6 +607,9 @@ class SessionCard(QWidget):
         self.context_ring.set_percent(percent)
         self.context_ring.setVisible(percent > 0)
         self.update_animation()
+
+        # Update timeline strip
+        self.timeline_strip.set_tools(self.session.recent_tools, self.config)
 
 
 class ClaudeNotchOverlay(QWidget):
