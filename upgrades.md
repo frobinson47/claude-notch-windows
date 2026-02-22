@@ -11,7 +11,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 | Sound cues | System beeps for errors, attention, session end (winsound) | Small | DONE | Shipped with 2s debounce, per-type cooldown, settings toggles |
 | Error flash | Red flash overlay on session card for Bash failures | Small | DONE | Shipped with QPropertyAnimation fade, exit-code-first detection |
 | Desktop toasts | Windows native notifications via winrt for key events | Small | DONE | Shipped: toast_requested Signal with shared cooldown, wired through QSystemTrayIcon.showMessage. toasts_enabled toggle in Settings > Notifications |
-| Discord/Slack webhook | POST event summaries to a user-configured webhook URL | Medium | READY | Async dispatcher required (never UI thread). Store secrets via Windows Credential Manager. Redacted payloads by default. Rate limiting/429 handling |
+| Discord/Slack webhook | POST event summaries to a user-configured webhook URL | Medium | DONE | Shipped: webhook_dispatcher.py with async threading dispatch, auto-detect Discord/Slack format, 5s rate limiting, 429 retry, redacted payloads. UI in Settings > Notifications with URL field + test button. 10 tests |
 
 ## Stats & Insights
 
@@ -51,7 +51,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 7. ~~Desktop toasts~~ DONE
 8. ~~Theme presets~~ DONE
 9. ~~Click-to-focus~~ DONE
-10. Discord/Slack webhook (Medium, security/async complexity)
+10. ~~Discord/Slack webhook~~ DONE
 
 All features received CONDITIONAL GO from Codex architecture review (2026-02-21).
 Zero NO-GOs. Each has specific prerequisites documented in Review Notes.

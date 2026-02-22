@@ -34,6 +34,8 @@ DEFAULTS = {
     "mini_mode": False,             # Compact single-line session cards
     "theme": "dark",
     "click_to_focus": False,        # Click session card to focus terminal
+    "webhook_url": "",              # Discord/Slack webhook URL
+    "webhook_enabled": False,       # Master toggle for webhook dispatch
 }
 
 # Validation ranges for numeric settings
@@ -126,6 +128,13 @@ class UserSettings(QObject):
 
         if key == "theme":
             return isinstance(value, str) and value in ("dark", "light")
+
+        if key == "webhook_url":
+            if not isinstance(value, str):
+                return False
+            if value and not value.startswith("https://"):
+                return False
+            return True
 
         return True
 

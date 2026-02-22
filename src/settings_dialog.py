@@ -4,6 +4,7 @@ Non-modal, frameless dialog with live-updating preferences.
 """
 
 import logging
+import threading
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QSpinBox, QCheckBox, QComboBox, QSlider,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont, QGuiApplication
 from themes import get_theme, get_theme_names, generate_dialog_stylesheet
+from webhook_dispatcher import WebhookDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +298,40 @@ class SettingsDialog(QDialog):
         info.setWordWrap(True)
         form.addRow("", info)
 
+        # Webhook notifications
+        webhook_group = QGroupBox("Webhook Notifications")
+        webhook_layout = QVBoxLayout(webhook_group)
+
+        self.webhook_cb = QCheckBox("Enable webhook notifications")
+        self.webhook_cb.setChecked(self.user_settings.get("webhook_enabled"))
+        self.webhook_cb.toggled.connect(lambda v: self.user_settings.set("webhook_enabled", v))
+        webhook_layout.addWidget(self.webhook_cb)
+
+        url_layout = QHBoxLayout()
+        self.webhook_url_edit = QLineEdit()
+        self.webhook_url_edit.setPlaceholderText("https://discord.com/api/webhooks/... or https://hooks.slack.com/...")
+        self.webhook_url_edit.setText(self.user_settings.get("webhook_url"))
+        self.webhook_url_edit.editingFinished.connect(self._on_webhook_url_changed)
+        url_layout.addWidget(self.webhook_url_edit)
+
+        self.webhook_test_btn = QPushButton("Test")
+        self.webhook_test_btn.setFixedWidth(60)
+        self.webhook_test_btn.clicked.connect(self._test_webhook)
+        url_layout.addWidget(self.webhook_test_btn)
+        webhook_layout.addLayout(url_layout)
+
+        self.webhook_status_label = QLabel("")
+        self.webhook_status_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.webhook_status_label.setWordWrap(True)
+        webhook_layout.addWidget(self.webhook_status_label)
+
+        webhook_note = QLabel("Sends event summaries (errors, attention, session end) to Discord or Slack")
+        webhook_note.setStyleSheet("color: #888; font-size: 11px;")
+        webhook_note.setWordWrap(True)
+        webhook_layout.addWidget(webhook_note)
+
+        form.addRow(webhook_group)
+
         return page
 
     def _build_hooks_tab(self) -> QWidget:
@@ -529,6 +565,35 @@ class SettingsDialog(QDialog):
         self.user_settings.set("launch_on_startup", checked)
         self.user_settings.set_startup_enabled(checked)
 
+    def _on_webhook_url_changed(self):
+        url = self.webhook_url_edit.text().strip()
+        self.webhook_url_edit.setText(url)
+        self.user_settings.set("webhook_url", url)
+
+    def _test_webhook(self):
+        url = self.webhook_url_edit.text().strip()
+        if not url:
+            self.webhook_status_label.setText("Enter a webhook URL first")
+            self.webhook_status_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            return
+        self.webhook_test_btn.setEnabled(False)
+        self.webhook_status_label.setText("Testing...")
+        self.webhook_status_label.setStyleSheet("color: #888; font-size: 11px;")
+
+        def _run_test():
+            dispatcher = WebhookDispatcher()
+            ok, msg = dispatcher.send_test(url)
+            # Update UI from main thread
+            self.webhook_test_btn.setEnabled(True)
+            if ok:
+                self.webhook_status_label.setText("Test sent successfully!")
+                self.webhook_status_label.setStyleSheet("color: #4a9; font-size: 11px;")
+            else:
+                self.webhook_status_label.setText(f"Failed: {msg}")
+                self.webhook_status_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
+
+        threading.Thread(target=_run_test, daemon=True).start()
+
     def _install_hooks(self):
         if not self._setup_manager:
             return
@@ -577,6 +642,8 @@ class SettingsDialog(QDialog):
         self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))
         self._populate_monitors()
         self._load_project_colors_text()
+        self.webhook_cb.setChecked(self.user_settings.get("webhook_enabled"))
+        self.webhook_url_edit.setText(self.user_settings.get("webhook_url"))
 
     # ── Painting & drag ──────────────────────────────────────────
 
