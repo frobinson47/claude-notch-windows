@@ -7,10 +7,11 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QSpinBox, QCheckBox, QComboBox, QSlider,
-    QPushButton, QGroupBox, QFormLayout, QSizePolicy,
+    QPushButton, QGroupBox, QFormLayout, QSizePolicy, QLineEdit,
+    QPlainTextEdit,
 )
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont
+from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont, QGuiApplication
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ QLabel {
     color: #ddd;
     font-size: 13px;
 }
-QSpinBox, QComboBox {
+QSpinBox, QComboBox, QLineEdit {
     background: #2a2a2a;
     color: #eee;
     border: 1px solid #555;
@@ -147,7 +148,7 @@ class SettingsDialog(QDialog):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(480, 420)
-        self.setMaximumSize(560, 580)
+        self.setMaximumSize(560, 680)
         self.setStyleSheet(_DARK_STYLE)
 
         self._build_ui()
@@ -243,6 +244,19 @@ class SettingsDialog(QDialog):
         self.startup_cb.toggled.connect(self._on_startup_toggled)
         form.addRow("", self.startup_cb)
 
+        # Global hotkey
+        self.hotkey_edit = QLineEdit()
+        self.hotkey_edit.setPlaceholderText("e.g., ctrl+shift+n")
+        self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))
+        self.hotkey_edit.editingFinished.connect(self._on_hotkey_changed)
+        hotkey_note = QLabel("Leave empty to disable. Restart may be required.")
+        hotkey_note.setStyleSheet("color: #888; font-size: 11px;")
+        hotkey_layout = QVBoxLayout()
+        hotkey_layout.setSpacing(2)
+        hotkey_layout.addWidget(self.hotkey_edit)
+        hotkey_layout.addWidget(hotkey_note)
+        form.addRow("Global hotkey:", hotkey_layout)
+
         return page
 
     def _build_overlay_tab(self) -> QWidget:
@@ -269,6 +283,14 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Screen position:", self.position_combo)
 
+        # F1: Target monitor
+        self.monitor_combo = QComboBox()
+        self._populate_monitors()
+        self.monitor_combo.currentIndexChanged.connect(
+            lambda i: self.user_settings.set("target_monitor", self.monitor_combo.itemData(i) or "")
+        )
+        form.addRow("Target monitor:", self.monitor_combo)
+
         # Background opacity
         opacity_layout = QHBoxLayout()
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -286,6 +308,25 @@ class SettingsDialog(QDialog):
         self.auto_hide_cb.setChecked(self.user_settings.get("auto_hide"))
         self.auto_hide_cb.toggled.connect(lambda v: self.user_settings.set("auto_hide", v))
         form.addRow("", self.auto_hide_cb)
+
+        # F2: Per-project accent colors
+        colors_group = QGroupBox("Project Accent Colors")
+        colors_layout = QVBoxLayout(colors_group)
+        self.project_colors_edit = QPlainTextEdit()
+        self.project_colors_edit.setFixedHeight(80)
+        self.project_colors_edit.setPlaceholderText("project_name=color_name (one per line)")
+        self.project_colors_edit.setStyleSheet(
+            "QPlainTextEdit { background: #2a2a2a; color: #eee; border: 1px solid #555; "
+            "border-radius: 4px; padding: 4px; font-size: 12px; }"
+        )
+        self._load_project_colors_text()
+        self.project_colors_edit.focusOutEvent = self._project_colors_focus_out
+        colors_layout.addWidget(self.project_colors_edit)
+        colors_note = QLabel("Available colors: cyan, purple, green, amber, orange, red, violet, blue, slate")
+        colors_note.setStyleSheet("color: #888; font-size: 11px;")
+        colors_note.setWordWrap(True)
+        colors_layout.addWidget(colors_note)
+        form.addRow(colors_group)
 
         return page
 
@@ -319,6 +360,12 @@ class SettingsDialog(QDialog):
         self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
         self.error_flash_cb.toggled.connect(lambda v: self.user_settings.set("error_flash_enabled", v))
         form.addRow("", self.error_flash_cb)
+
+        # F3: Desktop toasts
+        self.toasts_cb = QCheckBox("Enable desktop toast notifications")
+        self.toasts_cb.setChecked(self.user_settings.get("toasts_enabled"))
+        self.toasts_cb.toggled.connect(lambda v: self.user_settings.set("toasts_enabled", v))
+        form.addRow("", self.toasts_cb)
 
         # Info label
         info = QLabel(
@@ -418,6 +465,49 @@ class SettingsDialog(QDialog):
 
     # ── Callbacks ────────────────────────────────────────────────
 
+    def _populate_monitors(self):
+        """Populate monitor combo from available screens."""
+        self.monitor_combo.blockSignals(True)
+        self.monitor_combo.clear()
+        self.monitor_combo.addItem("Primary Screen", "")
+        current = self.user_settings.get("target_monitor")
+        selected_idx = 0
+        for screen in QGuiApplication.screens():
+            name = screen.name()
+            geo = screen.geometry()
+            label = f"{name} ({geo.width()}x{geo.height()})"
+            self.monitor_combo.addItem(label, name)
+            if name == current:
+                selected_idx = self.monitor_combo.count() - 1
+        self.monitor_combo.setCurrentIndex(selected_idx)
+        self.monitor_combo.blockSignals(False)
+
+    def _load_project_colors_text(self):
+        """Load project_colors dict into the text editor."""
+        colors = self.user_settings.get("project_colors")
+        lines = [f"{k}={v}" for k, v in sorted(colors.items())]
+        self.project_colors_edit.setPlainText("\n".join(lines))
+
+    def _project_colors_focus_out(self, event):
+        """Parse and save project colors when the text editor loses focus."""
+        QPlainTextEdit.focusOutEvent(self.project_colors_edit, event)
+        self._save_project_colors()
+
+    def _save_project_colors(self):
+        """Parse text into dict and save."""
+        text = self.project_colors_edit.toPlainText()
+        colors = {}
+        for line in text.strip().splitlines():
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key and value:
+                colors[key] = value
+        self.user_settings.set("project_colors", colors)
+
     def _on_opacity_changed(self, value: int):
         self.opacity_label.setText(f"{round(value / 255 * 100)}%")
         self.user_settings.set("background_opacity", value)
@@ -426,6 +516,11 @@ class SettingsDialog(QDialog):
         mult = round(value / 100, 2)
         self.speed_label.setText(f"{mult:.2f}x")
         self.user_settings.set("animation_speed_multiplier", mult)
+
+    def _on_hotkey_changed(self):
+        value = self.hotkey_edit.text().strip().lower()
+        self.hotkey_edit.setText(value)
+        self.user_settings.set("global_hotkey", value)
 
     def _on_startup_toggled(self, checked: bool):
         self.user_settings.set("launch_on_startup", checked)
@@ -471,6 +566,10 @@ class SettingsDialog(QDialog):
         self.speed_slider.setValue(int(self.user_settings.get("animation_speed_multiplier") * 100))
         self.sounds_cb.setChecked(self.user_settings.get("sounds_enabled"))
         self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
+        self.toasts_cb.setChecked(self.user_settings.get("toasts_enabled"))
+        self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))
+        self._populate_monitors()
+        self._load_project_colors_text()
 
     # ── Painting & drag ──────────────────────────────────────────
 

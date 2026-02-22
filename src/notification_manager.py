@@ -17,14 +17,20 @@ _SOUND_MAP = {
     "session_end": winsound.MB_ICONASTERISK,
 }
 
-# Minimum seconds between repeated sounds of the same type
+# Minimum seconds between repeated notifications of the same type
 _COOLDOWN_SECONDS = 2.0
+
+# QSystemTrayIcon.MessageIcon enum values (avoid importing QSystemTrayIcon here)
+_TOAST_INFO = 1       # QSystemTrayIcon.Information
+_TOAST_WARNING = 2    # QSystemTrayIcon.Warning
+_TOAST_CRITICAL = 3   # QSystemTrayIcon.Critical
 
 
 class NotificationManager(QObject):
-    """Central notification coordinator for sound cues and error flashes."""
+    """Central notification coordinator for sound cues, error flashes, and desktop toasts."""
 
     error_flash = Signal(str)  # session_id — triggers red flash on overlay
+    toast_requested = Signal(str, str, int)  # title, message, QSystemTrayIcon.MessageIcon int
 
     def __init__(self, state_manager, user_settings, parent=None):
         super().__init__(parent)
@@ -37,7 +43,7 @@ class NotificationManager(QObject):
         state_manager.session_ended.connect(self.on_session_end)
 
     def _is_cooled_down(self, event_type: str) -> bool:
-        """Check if enough time has passed since the last sound of this type."""
+        """Check if enough time has passed since the last notification of this type."""
         now = time.time()
         last = self._cooldowns.get(event_type, 0.0)
         if now - last < _COOLDOWN_SECONDS:
@@ -45,11 +51,9 @@ class NotificationManager(QObject):
         self._cooldowns[event_type] = now
         return True
 
-    def _play_sound(self, event_type: str):
-        """Play a system sound if enabled and not in cooldown."""
+    def _play_sound_unchecked(self, event_type: str):
+        """Play a system sound if enabled (caller already checked cooldown)."""
         if not self._user_settings.get("sounds_enabled"):
-            return
-        if not self._is_cooled_down(event_type):
             return
         sound_flag = _SOUND_MAP.get(event_type)
         if sound_flag is None:
@@ -58,6 +62,12 @@ class NotificationManager(QObject):
             winsound.MessageBeep(sound_flag)
         except Exception as e:
             logger.debug(f"Failed to play sound '{event_type}': {e}")
+
+    def _emit_toast(self, title: str, message: str, icon_type: int):
+        """Emit toast signal if toasts are enabled (caller already checked cooldown)."""
+        if not self._user_settings.get("toasts_enabled"):
+            return
+        self.toast_requested.emit(title, message, icon_type)
 
     def _trigger_flash(self, session_id: str):
         """Emit error flash signal if enabled."""
@@ -68,14 +78,20 @@ class NotificationManager(QObject):
     # ── Public slots ────────────────────────────────────────────
 
     def on_error(self, session_id: str, tool_name: str):
-        """Handle error detection: play error sound + trigger red flash."""
-        self._play_sound("error")
+        """Handle error detection: play error sound + trigger red flash + toast."""
+        if self._is_cooled_down("error"):
+            self._play_sound_unchecked("error")
+            self._emit_toast("Claude Code Error", f"Error in {tool_name}", _TOAST_CRITICAL)
         self._trigger_flash(session_id)
 
     def on_attention(self, session_id: str):
-        """Handle attention-needed event: play attention sound."""
-        self._play_sound("attention")
+        """Handle attention-needed event: play attention sound + toast."""
+        if self._is_cooled_down("attention"):
+            self._play_sound_unchecked("attention")
+            self._emit_toast("Claude Code", "Attention needed", _TOAST_WARNING)
 
     def on_session_end(self, session_id: str):
-        """Handle session end: play session-end sound."""
-        self._play_sound("session_end")
+        """Handle session end: play session-end sound + toast."""
+        if self._is_cooled_down("session_end"):
+            self._play_sound_unchecked("session_end")
+            self._emit_toast("Claude Code", "Session ended", _TOAST_INFO)

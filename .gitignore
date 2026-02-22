@@ -3,3 +3,6 @@ __pycache__/
 *.pyo
 .claude/
 *.log
+
+# AgentOps session artifacts (auto-added)
+.agents/

@@ -18,6 +18,7 @@ from user_settings import UserSettings
 from tray_icon import ClaudeNotchTray
 from overlay_window import ClaudeNotchOverlay
 from notification_manager import NotificationManager
+from hotkey_manager import HotkeyManager
 
 
 # Setup logging
@@ -127,6 +128,15 @@ class ClaudeNotchApp:
         self.tray.set_overlay_window(self.overlay)
         self.logger.info("System tray icon created")
 
+        # Wire desktop toast notifications (F3)
+        self.notification_manager.toast_requested.connect(self.tray.show_toast)
+
+        # Create global hotkey manager
+        self.hotkey_manager = HotkeyManager(self.user_settings)
+        self.hotkey_manager.hotkey_pressed.connect(self.overlay.toggle_visibility)
+        self.user_settings.settings_changed.connect(self._on_setting_changed)
+        self.logger.info("Hotkey manager created")
+
         self.logger.info("Application initialized successfully")
 
     def run(self):
@@ -134,9 +144,18 @@ class ClaudeNotchApp:
         self.logger.info("Application running")
         return self.app.exec()
 
+    def _on_setting_changed(self, key: str):
+        """Re-register hotkey when the setting changes."""
+        if key == "global_hotkey":
+            self.hotkey_manager.update_hotkey(self.user_settings.get("global_hotkey"))
+
     def cleanup(self):
         """Cleanup on exit."""
         self.logger.info("Cleaning up...")
+
+        # Stop hotkey listener
+        if self.hotkey_manager:
+            self.hotkey_manager.cleanup()
 
         # Stop server
         if self.server:

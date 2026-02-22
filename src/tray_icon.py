@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Slot
 from state_manager import StateManager, NotchConfig
 
 logger = logging.getLogger(__name__)
@@ -299,6 +299,11 @@ class ClaudeNotchTray(QSystemTrayIcon):
         # Quit app
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
+
+    @Slot(str, str, int)
+    def show_toast(self, title: str, message: str, icon_type: int):
+        """Show a desktop toast notification via the system tray."""
+        self.showMessage(title, message, QSystemTrayIcon.MessageIcon(icon_type), 5000)
 
     def set_overlay_window(self, window):
         """Set the overlay window reference."""

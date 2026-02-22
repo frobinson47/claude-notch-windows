@@ -27,6 +27,10 @@ DEFAULTS = {
     "animations_enabled": True,
     "sounds_enabled": True,
     "error_flash_enabled": True,
+    "global_hotkey": "ctrl+shift+n",
+    "target_monitor": "",          # F1: empty = primary screen
+    "project_colors": {},          # F2: {"project_name": "color_name"}
+    "toasts_enabled": True,        # F3: desktop toast notifications
 }
 
 # Validation ranges for numeric settings
@@ -104,6 +108,18 @@ class UserSettings(QObject):
 
         if key == "screen_position":
             return value in VALID_POSITIONS
+
+        if key == "global_hotkey":
+            from hotkey_manager import validate_hotkey_string
+            return validate_hotkey_string(value)
+
+        if key == "target_monitor":
+            return isinstance(value, str)
+
+        if key == "project_colors":
+            if not isinstance(value, dict):
+                return False
+            return all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
         return True
 

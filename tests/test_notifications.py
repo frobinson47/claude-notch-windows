@@ -305,3 +305,84 @@ class TestSettingsMigration:
         # New keys get defaults
         assert us.get("sounds_enabled") is True
         assert us.get("error_flash_enabled") is True
+        assert us.get("toasts_enabled") is True
+        assert us.get("target_monitor") == ""
+        assert us.get("project_colors") == {}
+
+
+# ── Desktop toast tests (F3) ─────────────────────────────────────
+
+
+class TestToastSignal:
+    """Test toast_requested signal emission."""
+
+    def test_toast_emitted_on_error(self, notification_mgr, qapp):
+        """Error event emits toast_requested signal."""
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        with patch('notification_manager.winsound'):
+            notification_mgr.on_error('s1', 'Bash')
+
+        assert len(received) == 1
+        assert received[0][0] == "Claude Code Error"
+        assert "Bash" in received[0][1]
+
+    def test_toast_emitted_on_attention(self, notification_mgr, qapp):
+        """Attention event emits toast_requested signal."""
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        with patch('notification_manager.winsound'):
+            notification_mgr.on_attention('s1')
+
+        assert len(received) == 1
+        assert "Attention" in received[0][1]
+
+    def test_toast_emitted_on_session_end(self, notification_mgr, qapp):
+        """Session end event emits toast_requested signal."""
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        with patch('notification_manager.winsound'):
+            notification_mgr.on_session_end('s1')
+
+        assert len(received) == 1
+        assert "ended" in received[0][1]
+
+    def test_toast_disabled_blocks_signal(self, notification_mgr, user_settings, qapp):
+        """When toasts_enabled is False, toast_requested is not emitted."""
+        user_settings.set("toasts_enabled", False)
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        with patch('notification_manager.winsound'):
+            notification_mgr.on_error('s1', 'Bash')
+
+        assert received == []
+
+    def test_toasts_enabled_default(self, user_settings, qapp):
+        """toasts_enabled defaults to True."""
+        assert user_settings.get("toasts_enabled") is True
+
+    def test_shared_cooldown_blocks_rapid_toast(self, notification_mgr, qapp):
+        """Rapid duplicate events block both sound and toast."""
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        with patch('notification_manager.winsound'):
+            notification_mgr.on_error('s1', 'Bash')
+            notification_mgr.on_error('s1', 'Bash')
+
+        # Only one toast despite two events
+        assert len(received) == 1
+
+    def test_sounds_disabled_toast_still_fires(self, notification_mgr, user_settings, qapp):
+        """When sounds_enabled is False, toast still fires."""
+        user_settings.set("sounds_enabled", False)
+        received = []
+        notification_mgr.toast_requested.connect(lambda t, m, i: received.append((t, m, i)))
+
+        notification_mgr.on_error('s1', 'Bash')
+
+        assert len(received) == 1

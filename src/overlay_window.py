@@ -432,6 +432,18 @@ class SessionCard(QWidget):
             return f"Context: {self.session.context_percent:.1f}%"
         return ""
 
+    def _get_session_project_color(self) -> Optional[tuple]:
+        """Look up per-project accent color for this card's session."""
+        if not self.user_settings or not self.session.project_name:
+            return None
+        project_colors = self.user_settings.get("project_colors")
+        color_name = project_colors.get(self.session.project_name)
+        if not color_name:
+            return None
+        if color_name not in self.config.colors:
+            return None
+        return self.config.get_color_rgb(color_name)
+
     def update_animation(self):
         """Update animation based on current session state."""
         speed = 1.0
@@ -465,10 +477,11 @@ class SessionCard(QWidget):
                     attention_config=attention_config,
                 )
         else:
-            # Idle - dormant pattern
+            # Idle - dormant pattern (use project color if configured, else slate)
             self._last_tool_key = None
             self._last_duration_level = "normal"
-            color_rgb = self.config.get_color_rgb('slate')
+            project_rgb = self._get_session_project_color()
+            color_rgb = project_rgb if project_rgb else self.config.get_color_rgb('slate')
             pattern_config = self.config.get_pattern_config('dormant')
             idle_attention = self.config.get_attention_config('peripheral')
             self.activity_indicator.set_pattern(
@@ -594,9 +607,20 @@ class ClaudeNotchOverlay(QWidget):
         # Set minimum size
         self.setMinimumSize(400, 100)
 
+    def _get_target_screen(self):
+        """Get the target screen from settings, falling back to primary."""
+        target_name = ""
+        if self.user_settings:
+            target_name = self.user_settings.get("target_monitor")
+        if target_name:
+            for screen in QGuiApplication.screens():
+                if screen.name() == target_name:
+                    return screen
+        return QGuiApplication.primaryScreen()
+
     def _position_window(self):
         """Position window at the configured screen corner."""
-        screen = QGuiApplication.primaryScreen()
+        screen = self._get_target_screen()
         screen_rect = screen.availableGeometry()
         padding = 20
 
@@ -633,9 +657,30 @@ class ClaudeNotchOverlay(QWidget):
         if card:
             card.flash_error()
 
+    def _get_project_color(self, session) -> Optional[tuple]:
+        """Look up per-project accent color. Returns RGB tuple or None."""
+        if not self.user_settings or not session.project_name:
+            return None
+        project_colors = self.user_settings.get("project_colors")
+        color_name = project_colors.get(session.project_name)
+        if not color_name:
+            return None
+        # Validate color exists in config
+        if color_name not in self.config.colors:
+            return None
+        return self.config.get_color_rgb(color_name)
+
     def _update_accent_color(self):
-        """Determine accent color from the most active session's tool."""
+        """Determine accent color: project color > tool color > None."""
         for card in self.session_cards.values():
+            # Check project color first
+            project_rgb = self._get_project_color(card.session)
+            if project_rgb:
+                new_color = QColor(*project_rgb)
+                if self._accent_color != new_color:
+                    self._accent_color = new_color
+                    self.update()
+                return
             if card.session.active_tool:
                 color_rgb = self.config.get_color_rgb(card.session.active_tool.color)
                 new_color = QColor(*color_rgb)
@@ -814,7 +859,7 @@ class ClaudeNotchOverlay(QWidget):
 
     def _clamp_to_screen(self):
         """Clamp overlay position to screen edges after drag + resize."""
-        screen = QGuiApplication.primaryScreen()
+        screen = self._get_target_screen()
         screen_rect = screen.availableGeometry()
         pos = self.pos()
         x = max(screen_rect.left(), min(pos.x(), screen_rect.right() - self.width()))
@@ -828,7 +873,7 @@ class ClaudeNotchOverlay(QWidget):
 
     def _on_setting_changed(self, key: str):
         """React to user setting changes."""
-        if key == "screen_position":
+        if key in ("screen_position", "target_monitor"):
             self._user_dragged = False
             self._position_window()
         elif key == "background_opacity":
@@ -838,6 +883,18 @@ class ClaudeNotchOverlay(QWidget):
         elif key in ("animation_speed_multiplier", "animations_enabled"):
             for card in self.session_cards.values():
                 card.update_animation()
+        elif key == "project_colors":
+            self._update_accent_color()
+            for card in self.session_cards.values():
+                card.update_animation()
+
+    def toggle_visibility(self):
+        """Toggle overlay show/hide (used by global hotkey)."""
+        if self.isVisible() and not self._is_fading_out:
+            self._animated_hide()
+        elif not self.isVisible():
+            self._is_fading_out = False
+            self._animated_show()
 
     def mousePressEvent(self, event):
         """Handle mouse press for dragging."""

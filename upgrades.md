@@ -25,7 +25,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 | Feature | What it does | Effort | Status | Review Notes |
 |---------|-------------|--------|--------|-------------|
 | Auto-start on boot | Add/remove Windows startup registry entry from settings | Small | DONE | Already shipped in UserSettings + SettingsDialog |
-| Global hotkey | Toggle overlay visibility with configurable shortcut | Small | READY | Use native RegisterHotKey via ctypes (not pynput/keyboard). Make shortcut user-configurable. Non-fatal if registration fails, tray toggle as fallback |
+| Global hotkey | Toggle overlay visibility with configurable shortcut | Small | DONE | Shipped: Win32 RegisterHotKey via ctypes, daemon GetMessage thread, Signal bridge. Default Ctrl+Shift+N, configurable in Settings > Behavior. Non-fatal on failure |
 | Click-to-focus | Click a session card to bring that terminal to foreground | Medium | READY | Constrained v1: explicit HWND/PID binding at session start, not title heuristics. Accept SetForegroundWindow limitations. Ship behind feature flag |
 | Multi-monitor | Settings dropdown to pick which display | Small | READY | Minimal monitor selector + robust fallback/clamping. Handle hot-plug, negative coordinates, mixed DPI. Persist stable screen identity tuple |
 
@@ -42,7 +42,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 
 ## Suggested Priority (by value/effort)
 
-1. Global hotkey (Small, high UX value)
+1. ~~Global hotkey~~ DONE
 2. Multi-monitor (Small, core power-user need)
 3. Per-project colors (Small, config-only)
 4. Timeline strip (Medium, leverages existing recent_tools)
