@@ -33,7 +33,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 
 | Feature | What it does | Effort | Status | Review Notes |
 |---------|-------------|--------|--------|-------------|
-| Mini mode | Collapsed single-line bar showing just color + project name | Medium | READY | Presentation-layer variant with shared session model. Phase 1: static mini, no heavy effects. Explicit UI state machine for transitions |
+| Mini mode | Collapsed single-line bar showing just color + project name | Medium | DONE | Shipped: MiniSessionCard (26px, color dot + project name + status), toggle via Settings > Overlay checkbox and tray menu. _rebuild_cards() switches card type live. 9 tests |
 | Timeline strip | Thin color bar showing last N tool changes as a history | Medium | DONE | Shipped: 8px TimelineStrip widget below session card, coalesces consecutive same-category, proportional segments with 1px min width, auto-hides when empty. 6 tests |
 | Per-project colors | Map project names to custom overlay accent colors in config | Small | DONE | Shipped: project_colors dict in settings, precedence: project > tool > slate. Text editor in Settings > Overlay with color validation |
 | Theme presets | Light/dark/custom background + text color schemes | Medium | READY | Limit to Dark/Light/Custom. Tokenize hardcoded color literals. Config migration for existing users. Contrast guardrails |
@@ -46,7 +46,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 2. ~~Multi-monitor~~ DONE
 3. ~~Per-project colors~~ DONE
 4. ~~Timeline strip~~ DONE
-5. Mini mode (Medium, significant UX win)
+5. ~~Mini mode~~ DONE
 6. Session statistics (Medium, extends existing tracking)
 7. ~~Desktop toasts~~ DONE
 8. Theme presets (Medium, quality-of-life)
