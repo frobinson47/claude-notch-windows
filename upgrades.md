@@ -34,7 +34,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 | Feature | What it does | Effort | Status | Review Notes |
 |---------|-------------|--------|--------|-------------|
 | Mini mode | Collapsed single-line bar showing just color + project name | Medium | READY | Presentation-layer variant with shared session model. Phase 1: static mini, no heavy effects. Explicit UI state machine for transitions |
-| Timeline strip | Thin color bar showing last N tool changes as a history | Medium | READY | Static, non-animated, max 10 segments from existing recent_tools. Coalesce consecutive same-category. Enforce 1px minimum segment width |
+| Timeline strip | Thin color bar showing last N tool changes as a history | Medium | DONE | Shipped: 8px TimelineStrip widget below session card, coalesces consecutive same-category, proportional segments with 1px min width, auto-hides when empty. 6 tests |
 | Per-project colors | Map project names to custom overlay accent colors in config | Small | DONE | Shipped: project_colors dict in settings, precedence: project > tool > slate. Text editor in Settings > Overlay with color validation |
 | Theme presets | Light/dark/custom background + text color schemes | Medium | READY | Limit to Dark/Light/Custom. Tokenize hardcoded color literals. Config migration for existing users. Contrast guardrails |
 
@@ -45,7 +45,7 @@ Status: DONE = shipped, READY = reviewed & approved, SKIP = already covered
 1. ~~Global hotkey~~ DONE
 2. ~~Multi-monitor~~ DONE
 3. ~~Per-project colors~~ DONE
-4. Timeline strip (Medium, leverages existing recent_tools)
+4. ~~Timeline strip~~ DONE
 5. Mini mode (Medium, significant UX win)
 6. Session statistics (Medium, extends existing tracking)
 7. ~~Desktop toasts~~ DONE
