@@ -528,8 +528,9 @@ class StateManager(QObject):
         session.token_stats.cache_creation_tokens = cache_create
         session.token_stats.cache_read_tokens = cache_read
         context_window = 200000
-        session.context_tokens = input_t + output_t
-        session.context_percent = min((input_t / context_window) * 100, 100)
+        total_input = input_t + cache_create + cache_read
+        session.context_tokens = total_input + output_t
+        session.context_percent = min((total_input / context_window) * 100, 100)
         self.session_updated.emit(session_id)
         self.activity_changed.emit()
 
