@@ -31,6 +31,7 @@ DEFAULTS = {
     "target_monitor": "",          # F1: empty = primary screen
     "project_colors": {},          # F2: {"project_name": "color_name"}
     "toasts_enabled": True,        # F3: desktop toast notifications
+    "mini_mode": False,             # Compact single-line session cards
 }
 
 # Validation ranges for numeric settings

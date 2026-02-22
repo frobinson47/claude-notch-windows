@@ -612,6 +612,94 @@ class SessionCard(QWidget):
         self.timeline_strip.set_tools(self.session.recent_tools, self.config)
 
 
+class MiniSessionCard(QWidget):
+    """
+    Compact single-line card displaying a session's activity.
+    Shows a color dot, project name, and tool status.
+    """
+
+    def __init__(self, session: SessionState, config, user_settings=None, parent=None):
+        super().__init__(parent)
+
+        self.session = session
+        self.config = config
+        self.user_settings = user_settings
+
+        self.setFixedHeight(26)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        # Color dot
+        self._dot = _ColorDot()
+        layout.addWidget(self._dot)
+
+        # Project name
+        self._project_label = QLabel(self.session.display_name)
+        self._project_label.setStyleSheet(
+            "color: white; font-size: 12px; font-weight: bold;"
+        )
+        layout.addWidget(self._project_label)
+
+        # Status
+        self._status_label = QLabel(self._get_status_text())
+        self._status_label.setStyleSheet(
+            "color: rgba(255,255,255,0.55); font-size: 11px;"
+        )
+        layout.addWidget(self._status_label)
+        layout.addStretch()
+
+        self._update_dot_color()
+
+    def _get_status_text(self) -> str:
+        return self.session.active_tool.display_name if self.session.active_tool else "Idle"
+
+    def _get_dot_color(self) -> QColor:
+        """Determine dot color: project color > tool color > slate."""
+        if self.user_settings and self.session.project_name:
+            project_colors = self.user_settings.get("project_colors")
+            color_name = project_colors.get(self.session.project_name)
+            if color_name and color_name in self.config.colors:
+                return QColor(*self.config.get_color_rgb(color_name))
+        if self.session.active_tool:
+            return QColor(*self.config.get_color_rgb(self.session.active_tool.color))
+        return QColor(*self.config.get_color_rgb('slate'))
+
+    def _update_dot_color(self):
+        self._dot.color = self._get_dot_color()
+        self._dot.update()
+
+    def update_display(self):
+        self._project_label.setText(self.session.display_name)
+        self._status_label.setText(self._get_status_text())
+        self._update_dot_color()
+
+    def update_animation(self):
+        """No-op — mini mode has no animations."""
+
+    def flash_error(self):
+        """No-op — mini mode has no error flash."""
+
+
+class _ColorDot(QWidget):
+    """8x8 painted circle."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(8, 8)
+        self.color = QColor(120, 120, 130)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QBrush(self.color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(0, 0, 8, 8)
+
+
 class ClaudeNotchOverlay(QWidget):
     """
     Main overlay window.
@@ -627,10 +715,11 @@ class ClaudeNotchOverlay(QWidget):
         self.config = state_manager.config
         self.user_settings = user_settings
         self.notification_manager = notification_manager
-        self.session_cards = {}  # session_id -> SessionCard
+        self.session_cards = {}  # session_id -> SessionCard or MiniSessionCard
         self._user_dragged = False  # True after user drags overlay
         self._is_fading_out = False  # Guard against show during hide cleanup
         self._accent_color = None   # Current border accent color
+        self._mini_mode = user_settings.get("mini_mode") if user_settings else False
 
         # Window flags for overlay
         self.setWindowFlags(
@@ -680,8 +769,11 @@ class ClaudeNotchOverlay(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(10)
 
-        # Set minimum size
-        self.setMinimumSize(400, 100)
+        # Set minimum size based on mode
+        if self._mini_mode:
+            self.setMinimumSize(250, 30)
+        else:
+            self.setMinimumSize(400, 100)
 
     def _get_target_screen(self):
         """Get the target screen from settings, falling back to primary."""
@@ -788,8 +880,11 @@ class ClaudeNotchOverlay(QWidget):
                 card.session = session
                 card.update_display()
             else:
-                # Create new card
-                card = SessionCard(session, self.config, user_settings=self.user_settings)
+                # Create new card (mini or full)
+                if self._mini_mode:
+                    card = MiniSessionCard(session, self.config, user_settings=self.user_settings)
+                else:
+                    card = SessionCard(session, self.config, user_settings=self.user_settings)
                 self.session_cards[session.session_id] = card
                 self.layout.addWidget(card)
 
@@ -947,9 +1042,25 @@ class ClaudeNotchOverlay(QWidget):
         self._user_dragged = False
         self._position_window()
 
+    def _rebuild_cards(self):
+        """Clear all session cards and recreate them (used when card type changes)."""
+        for card in self.session_cards.values():
+            self.layout.removeWidget(card)
+            card.deleteLater()
+        self.session_cards.clear()
+        # Update minimum size for new mode
+        if self._mini_mode:
+            self.setMinimumSize(250, 30)
+        else:
+            self.setMinimumSize(400, 100)
+        self._update_sessions()
+
     def _on_setting_changed(self, key: str):
         """React to user setting changes."""
-        if key in ("screen_position", "target_monitor"):
+        if key == "mini_mode":
+            self._mini_mode = self.user_settings.get("mini_mode")
+            self._rebuild_cards()
+        elif key in ("screen_position", "target_monitor"):
             self._user_dragged = False
             self._position_window()
         elif key == "background_opacity":

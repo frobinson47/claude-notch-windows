@@ -74,6 +74,16 @@ class ClaudeNotchTray(QSystemTrayIcon):
         reset_pos_action.triggered.connect(self._reset_overlay_position)
         menu.addAction(reset_pos_action)
 
+        # Mini Mode (checkable)
+        self.mini_mode_action = QAction("Mini Mode", menu)
+        self.mini_mode_action.setCheckable(True)
+        if self.user_settings:
+            self.mini_mode_action.setChecked(self.user_settings.get("mini_mode"))
+        self.mini_mode_action.toggled.connect(
+            lambda v: self.user_settings.set("mini_mode", v) if self.user_settings else None
+        )
+        menu.addAction(self.mini_mode_action)
+
         menu.addSeparator()
 
         # Settings
@@ -189,6 +199,8 @@ class ClaudeNotchTray(QSystemTrayIcon):
         """React to user setting changes."""
         if key == "show_category_letter":
             self._update_icon()
+        elif key == "mini_mode":
+            self.mini_mode_action.setChecked(self.user_settings.get("mini_mode"))
 
     def _on_notification(self, session_id: str, message: str):
         """Show tray balloon for a Notification event."""

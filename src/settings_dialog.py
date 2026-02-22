@@ -309,6 +309,12 @@ class SettingsDialog(QDialog):
         self.auto_hide_cb.toggled.connect(lambda v: self.user_settings.set("auto_hide", v))
         form.addRow("", self.auto_hide_cb)
 
+        # Mini mode
+        self.mini_mode_cb = QCheckBox("Mini mode (compact single-line cards)")
+        self.mini_mode_cb.setChecked(self.user_settings.get("mini_mode"))
+        self.mini_mode_cb.toggled.connect(lambda v: self.user_settings.set("mini_mode", v))
+        form.addRow("", self.mini_mode_cb)
+
         # F2: Per-project accent colors
         colors_group = QGroupBox("Project Accent Colors")
         colors_layout = QVBoxLayout(colors_group)
@@ -567,6 +573,7 @@ class SettingsDialog(QDialog):
         self.sounds_cb.setChecked(self.user_settings.get("sounds_enabled"))
         self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
         self.toasts_cb.setChecked(self.user_settings.get("toasts_enabled"))
+        self.mini_mode_cb.setChecked(self.user_settings.get("mini_mode"))
         self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))
         self._populate_monitors()
         self._load_project_colors_text()
