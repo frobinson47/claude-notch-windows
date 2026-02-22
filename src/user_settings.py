@@ -10,7 +10,7 @@ import tempfile
 import winreg
 from pathlib import Path
 from typing import Any, Dict, Optional
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,13 @@ class UserSettings(QObject):
         self.settings_file = self.settings_dir / "settings.json"
         self._settings: Dict[str, Any] = dict(DEFAULTS)
         self._load()
+
+        # Debounce timer — coalesces rapid saves (e.g. slider drags) into
+        # a single file write, preventing main-thread freezes from disk I/O.
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save)
 
     def _load(self):
         """Load settings from disk, falling back to defaults for missing/invalid keys."""
@@ -157,12 +164,24 @@ class UserSettings(QObject):
             except OSError:
                 pass
 
+    def flush(self):
+        """Force any pending debounced save to disk immediately."""
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._save()
+
     def get(self, key: str) -> Any:
         """Get a setting value."""
         return self._settings.get(key, DEFAULTS.get(key))
 
     def set(self, key: str, value: Any):
-        """Set a setting value, save to disk, and emit signal."""
+        """Set a setting value, schedule debounced save, and emit signal.
+
+        The in-memory dict and signal fire immediately so the UI stays
+        responsive.  The actual file write is coalesced via a 500ms
+        debounce timer to avoid blocking the main thread with disk I/O
+        on every slider tick or spinbox step.
+        """
         if key not in DEFAULTS:
             logger.warning(f"Unknown setting key: {key}")
             return
@@ -173,7 +192,7 @@ class UserSettings(QObject):
         if old == value:
             return
         self._settings[key] = value
-        self._save()
+        self._save_timer.start()  # (re)start debounce — coalesces rapid changes
         logger.info(f"Setting changed: {key} = {value!r}")
         self.settings_changed.emit(key)
 
@@ -183,6 +202,7 @@ class UserSettings(QObject):
 
     def reset_to_defaults(self):
         """Reset all settings to defaults, save, and emit signals."""
+        self._save_timer.stop()  # cancel any pending debounced save
         changed_keys = [k for k in DEFAULTS if self._settings.get(k) != DEFAULTS[k]]
         self._settings = dict(DEFAULTS)
         self._save()

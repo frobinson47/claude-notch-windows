@@ -26,11 +26,16 @@ def notch_config():
 def user_settings(tmp_path, qapp, monkeypatch):
     """UserSettings using a temp directory for isolation."""
     from user_settings import UserSettings, DEFAULTS
-    from PySide6.QtCore import QObject
+    from PySide6.QtCore import QObject, QTimer
     # Build instance without __init__ so it doesn't load real settings
     settings = UserSettings.__new__(UserSettings)
     QObject.__init__(settings)
     settings.settings_dir = tmp_path
     settings.settings_file = tmp_path / "settings.json"
     settings._settings = dict(DEFAULTS)
+    # Debounce timer (matches __init__)
+    settings._save_timer = QTimer(settings)
+    settings._save_timer.setSingleShot(True)
+    settings._save_timer.setInterval(500)
+    settings._save_timer.timeout.connect(settings._save)
     return settings

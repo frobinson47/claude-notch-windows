@@ -106,6 +106,7 @@ class TestPersistence:
         s1.settings_dir = tmp_path
         s1.settings_file = tmp_path / "settings.json"
         s1.set("idle_timeout", 42)
+        s1.flush()  # force debounced save to disk
 
         # Create a new instance pointing at same file
         s2 = UserSettings()

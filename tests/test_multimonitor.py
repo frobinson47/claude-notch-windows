@@ -30,6 +30,7 @@ class TestTargetMonitorSetting:
         from PySide6.QtCore import QObject
 
         user_settings.set("target_monitor", "DP-2")
+        user_settings.flush()  # force debounced save to disk
         # Reload from the same file
         us2 = UserSettings.__new__(UserSettings)
         QObject.__init__(us2)

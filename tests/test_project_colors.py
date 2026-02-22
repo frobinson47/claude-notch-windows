@@ -39,6 +39,7 @@ class TestProjectColorsSetting:
 
         colors = {"proj1": "green", "proj2": "amber"}
         user_settings.set("project_colors", colors)
+        user_settings.flush()  # force debounced save to disk
 
         us2 = UserSettings.__new__(UserSettings)
         QObject.__init__(us2)
