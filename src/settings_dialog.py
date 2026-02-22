@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton, QGroupBox, QFormLayout, QSizePolicy, QLineEdit,
     QPlainTextEdit,
 )
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont, QGuiApplication
 from themes import get_theme, get_theme_names, generate_dialog_stylesheet
 from webhook_dispatcher import WebhookDispatcher
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 class SettingsDialog(QDialog):
     """Dark-themed, frameless settings dialog."""
+
+    _webhook_test_done = Signal(bool, str)  # ok, message — thread-safe bridge
 
     def __init__(self, user_settings, parent=None):
         super().__init__(parent)
@@ -40,6 +42,7 @@ class SettingsDialog(QDialog):
 
         self._build_ui()
         self.user_settings.settings_changed.connect(self._on_setting_changed)
+        self._webhook_test_done.connect(self._on_webhook_test_result)
 
     # ── UI construction ──────────────────────────────────────────
 
@@ -583,16 +586,20 @@ class SettingsDialog(QDialog):
         def _run_test():
             dispatcher = WebhookDispatcher()
             ok, msg = dispatcher.send_test(url)
-            # Update UI from main thread
-            self.webhook_test_btn.setEnabled(True)
-            if ok:
-                self.webhook_status_label.setText("Test sent successfully!")
-                self.webhook_status_label.setStyleSheet("color: #4a9; font-size: 11px;")
-            else:
-                self.webhook_status_label.setText(f"Failed: {msg}")
-                self.webhook_status_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            # Signal automatically queues across threads to main thread
+            self._webhook_test_done.emit(ok, msg)
 
         threading.Thread(target=_run_test, daemon=True).start()
+
+    def _on_webhook_test_result(self, ok: bool, msg: str):
+        """Handle webhook test result on the main thread."""
+        self.webhook_test_btn.setEnabled(True)
+        if ok:
+            self.webhook_status_label.setText("Test sent successfully!")
+            self.webhook_status_label.setStyleSheet("color: #4a9; font-size: 11px;")
+        else:
+            self.webhook_status_label.setText(f"Failed: {msg}")
+            self.webhook_status_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
     def _install_hooks(self):
         if not self._setup_manager:
