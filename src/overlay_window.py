@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QRadialGradient, QLinearGradient,
 )
 from state_manager import StateManager, SessionState
+from themes import get_theme, get_overlay_colors
 
 logger = logging.getLogger(__name__)
 
@@ -428,12 +429,13 @@ class SessionCard(QWidget):
     Shows project name, tool status, activity indicator, and context ring.
     """
 
-    def __init__(self, session: SessionState, config, user_settings=None, parent=None):
+    def __init__(self, session: SessionState, config, user_settings=None, theme_colors=None, parent=None):
         super().__init__(parent)
 
         self.session = session
         self.config = config
         self.user_settings = user_settings
+        self.theme_colors = theme_colors or get_overlay_colors(get_theme("dark"))
         self._flash_opacity = 0.0
         self._flash_animation = None
 
@@ -460,17 +462,17 @@ class SessionCard(QWidget):
 
         # Project name
         self.project_label = QLabel(self.session.display_name)
-        self.project_label.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
+        self.project_label.setStyleSheet(f"color: {self.theme_colors['text_css']}; font-size: 14px; font-weight: bold;")
         text_layout.addWidget(self.project_label)
 
         # Tool/status
         self.status_label = QLabel(self._get_status_text())
-        self.status_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 12px;")
+        self.status_label.setStyleSheet(f"color: {self.theme_colors['text_secondary_css']}; font-size: 12px;")
         text_layout.addWidget(self.status_label)
 
         # Context percentage
         self.context_label = QLabel(self._get_context_text())
-        self.context_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 11px;")
+        self.context_label.setStyleSheet(f"color: {self.theme_colors['text_muted_css']}; font-size: 11px;")
         text_layout.addWidget(self.context_label)
 
         top_row.addLayout(text_layout)
@@ -601,8 +603,11 @@ class SessionCard(QWidget):
     def update_display(self):
         """Update display labels."""
         self.project_label.setText(self.session.display_name)
+        self.project_label.setStyleSheet(f"color: {self.theme_colors['text_css']}; font-size: 14px; font-weight: bold;")
         self.status_label.setText(self._get_status_text())
+        self.status_label.setStyleSheet(f"color: {self.theme_colors['text_secondary_css']}; font-size: 12px;")
         self.context_label.setText(self._get_context_text())
+        self.context_label.setStyleSheet(f"color: {self.theme_colors['text_muted_css']}; font-size: 11px;")
         percent = int(self.session.context_percent)
         self.context_ring.set_percent(percent)
         self.context_ring.setVisible(percent > 0)
@@ -618,12 +623,13 @@ class MiniSessionCard(QWidget):
     Shows a color dot, project name, and tool status.
     """
 
-    def __init__(self, session: SessionState, config, user_settings=None, parent=None):
+    def __init__(self, session: SessionState, config, user_settings=None, theme_colors=None, parent=None):
         super().__init__(parent)
 
         self.session = session
         self.config = config
         self.user_settings = user_settings
+        self.theme_colors = theme_colors or get_overlay_colors(get_theme("dark"))
 
         self.setFixedHeight(26)
         self._setup_ui()
@@ -640,14 +646,14 @@ class MiniSessionCard(QWidget):
         # Project name
         self._project_label = QLabel(self.session.display_name)
         self._project_label.setStyleSheet(
-            "color: white; font-size: 12px; font-weight: bold;"
+            f"color: {self.theme_colors['text_css']}; font-size: 12px; font-weight: bold;"
         )
         layout.addWidget(self._project_label)
 
         # Status
         self._status_label = QLabel(self._get_status_text())
         self._status_label.setStyleSheet(
-            "color: rgba(255,255,255,0.55); font-size: 11px;"
+            f"color: {self.theme_colors['text_muted_css']}; font-size: 11px;"
         )
         layout.addWidget(self._status_label)
         layout.addStretch()
@@ -674,7 +680,13 @@ class MiniSessionCard(QWidget):
 
     def update_display(self):
         self._project_label.setText(self.session.display_name)
+        self._project_label.setStyleSheet(
+            f"color: {self.theme_colors['text_css']}; font-size: 12px; font-weight: bold;"
+        )
         self._status_label.setText(self._get_status_text())
+        self._status_label.setStyleSheet(
+            f"color: {self.theme_colors['text_muted_css']}; font-size: 11px;"
+        )
         self._update_dot_color()
 
     def update_animation(self):
@@ -720,6 +732,9 @@ class ClaudeNotchOverlay(QWidget):
         self._is_fading_out = False  # Guard against show during hide cleanup
         self._accent_color = None   # Current border accent color
         self._mini_mode = user_settings.get("mini_mode") if user_settings else False
+        self._theme_colors = get_overlay_colors(get_theme(
+            user_settings.get("theme") if user_settings else "dark"
+        ))
 
         # Window flags for overlay
         self.setWindowFlags(
@@ -882,9 +897,9 @@ class ClaudeNotchOverlay(QWidget):
             else:
                 # Create new card (mini or full)
                 if self._mini_mode:
-                    card = MiniSessionCard(session, self.config, user_settings=self.user_settings)
+                    card = MiniSessionCard(session, self.config, user_settings=self.user_settings, theme_colors=self._theme_colors)
                 else:
-                    card = SessionCard(session, self.config, user_settings=self.user_settings)
+                    card = SessionCard(session, self.config, user_settings=self.user_settings, theme_colors=self._theme_colors)
                 self.session_cards[session.session_id] = card
                 self.layout.addWidget(card)
 
@@ -932,7 +947,8 @@ class ClaudeNotchOverlay(QWidget):
         opacity = 220
         if self.user_settings:
             opacity = self.user_settings.get("background_opacity")
-        bg_color = QColor(20, 20, 20, opacity)
+        bg_rgb = self._theme_colors["bg_rgb"]
+        bg_color = QColor(*bg_rgb, opacity)
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.NoPen)
 
@@ -1070,6 +1086,12 @@ class ClaudeNotchOverlay(QWidget):
         elif key in ("animation_speed_multiplier", "animations_enabled"):
             for card in self.session_cards.values():
                 card.update_animation()
+        elif key == "theme":
+            self._theme_colors = get_overlay_colors(get_theme(self.user_settings.get("theme")))
+            self.update()  # repaint background
+            for card in self.session_cards.values():
+                card.theme_colors = self._theme_colors
+                card.update_display()
         elif key == "project_colors":
             self._update_accent_color()
             for card in self.session_cards.values():

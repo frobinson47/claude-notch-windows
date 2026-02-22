@@ -12,126 +12,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QColor, QBrush, QPainterPath, QFont, QGuiApplication
+from themes import get_theme, get_theme_names, generate_dialog_stylesheet
 
 logger = logging.getLogger(__name__)
 
-# Shared dark stylesheet for all widgets inside the dialog
-_DARK_STYLE = """
-QTabWidget::pane {
-    border: 1px solid #444;
-    background: transparent;
-    border-radius: 6px;
-}
-QTabBar::tab {
-    background: #2a2a2a;
-    color: #ccc;
-    padding: 8px 18px;
-    margin-right: 2px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-}
-QTabBar::tab:selected {
-    background: #3a3a3a;
-    color: #fff;
-}
-QTabBar::tab:hover {
-    background: #333;
-}
-QLabel {
-    color: #ddd;
-    font-size: 13px;
-}
-QSpinBox, QComboBox, QLineEdit {
-    background: #2a2a2a;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
-    min-width: 80px;
-}
-QSpinBox::up-button, QSpinBox::down-button {
-    background: #333;
-    border: none;
-    width: 16px;
-}
-QSpinBox::up-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid #aaa; }
-QSpinBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #aaa; }
-QCheckBox {
-    color: #ddd;
-    font-size: 13px;
-    spacing: 8px;
-}
-QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
-    border: 1px solid #666;
-    background: #2a2a2a;
-}
-QCheckBox::indicator:checked {
-    background: #4a9eff;
-    border-color: #4a9eff;
-}
-QSlider::groove:horizontal {
-    height: 6px;
-    background: #333;
-    border-radius: 3px;
-}
-QSlider::handle:horizontal {
-    background: #4a9eff;
-    width: 16px;
-    height: 16px;
-    margin: -5px 0;
-    border-radius: 8px;
-}
-QSlider::sub-page:horizontal {
-    background: #4a9eff;
-    border-radius: 3px;
-}
-QPushButton {
-    background: #333;
-    color: #ddd;
-    border: 1px solid #555;
-    border-radius: 6px;
-    padding: 6px 16px;
-    font-size: 13px;
-}
-QPushButton:hover {
-    background: #444;
-}
-QPushButton:pressed {
-    background: #222;
-}
-QGroupBox {
-    color: #aaa;
-    border: 1px solid #444;
-    border-radius: 6px;
-    margin-top: 12px;
-    padding-top: 16px;
-    font-size: 12px;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 20px;
-}
-QComboBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #aaa;
-}
-QComboBox QAbstractItemView {
-    background: #2a2a2a;
-    color: #eee;
-    selection-background-color: #4a9eff;
-    border: 1px solid #555;
-}
-"""
 
 
 class SettingsDialog(QDialog):
@@ -149,9 +33,11 @@ class SettingsDialog(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(480, 420)
         self.setMaximumSize(560, 680)
-        self.setStyleSheet(_DARK_STYLE)
+        theme = get_theme(self.user_settings.get("theme"))
+        self.setStyleSheet(generate_dialog_stylesheet(theme))
 
         self._build_ui()
+        self.user_settings.settings_changed.connect(self._on_setting_changed)
 
     # ── UI construction ──────────────────────────────────────────
 
@@ -265,6 +151,18 @@ class SettingsDialog(QDialog):
         form = QFormLayout(page)
         form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(14)
+
+        # Theme
+        self.theme_combo = QComboBox()
+        for name in get_theme_names():
+            self.theme_combo.addItem(name.title(), name)
+        current_theme = self.user_settings.get("theme")
+        theme_idx = next((i for i, n in enumerate(get_theme_names()) if n == current_theme), 0)
+        self.theme_combo.setCurrentIndex(theme_idx)
+        self.theme_combo.currentIndexChanged.connect(
+            lambda i: self.user_settings.set("theme", self.theme_combo.itemData(i))
+        )
+        form.addRow("Theme:", self.theme_combo)
 
         # Screen position
         self.position_combo = QComboBox()
@@ -594,6 +492,12 @@ class SettingsDialog(QDialog):
                 colors[key] = value
         self.user_settings.set("project_colors", colors)
 
+    def _on_setting_changed(self, key: str):
+        if key == "theme":
+            theme = get_theme(self.user_settings.get("theme"))
+            self.setStyleSheet(generate_dialog_stylesheet(theme))
+            self.update()  # repaint background
+
     def _on_opacity_changed(self, value: int):
         self.opacity_label.setText(f"{round(value / 255 * 100)}%")
         self.user_settings.set("background_opacity", value)
@@ -654,6 +558,8 @@ class SettingsDialog(QDialog):
         self.error_flash_cb.setChecked(self.user_settings.get("error_flash_enabled"))
         self.toasts_cb.setChecked(self.user_settings.get("toasts_enabled"))
         self.mini_mode_cb.setChecked(self.user_settings.get("mini_mode"))
+        theme_idx = next((i for i, n in enumerate(get_theme_names()) if n == self.user_settings.get("theme")), 0)
+        self.theme_combo.setCurrentIndex(theme_idx)
         self.hotkey_edit.setText(self.user_settings.get("global_hotkey"))
         self._populate_monitors()
         self._load_project_colors_text()
@@ -663,7 +569,9 @@ class SettingsDialog(QDialog):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        bg = QColor(20, 20, 20, 240)
+        theme = get_theme(self.user_settings.get("theme"))
+        bg_rgb = theme["bg"]
+        bg = QColor(*bg_rgb, 240)
         painter.setBrush(QBrush(bg))
         painter.setPen(Qt.NoPen)
         path = QPainterPath()

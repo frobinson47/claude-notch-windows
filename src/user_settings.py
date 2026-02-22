@@ -32,6 +32,7 @@ DEFAULTS = {
     "project_colors": {},          # F2: {"project_name": "color_name"}
     "toasts_enabled": True,        # F3: desktop toast notifications
     "mini_mode": False,             # Compact single-line session cards
+    "theme": "dark",
 }
 
 # Validation ranges for numeric settings
@@ -121,6 +122,9 @@ class UserSettings(QObject):
             if not isinstance(value, dict):
                 return False
             return all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+
+        if key == "theme":
+            return isinstance(value, str) and value in ("dark", "light")
 
         return True
 
