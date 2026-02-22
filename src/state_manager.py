@@ -7,6 +7,7 @@ import json
 import logging
 import random
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -64,6 +65,8 @@ class SessionState:
     context_percent: float = 0.0
     context_tokens: int = 0
     terminal_hwnd: Optional[int] = None
+    transcript_path: str = ""
+    last_token_read_time: float = 0.0
 
     @property
     def display_name(self) -> str:
@@ -172,6 +175,7 @@ class StateManager(QObject):
     notification_received = Signal(str, str)  # session_id, message
     error_detected = Signal(str, str)  # session_id, tool_name
     attention_needed = Signal(str)  # session_id
+    _token_update = Signal(str, int, int, int, int)  # session_id, input, output, cache_create, cache_read
 
     def __init__(self, config: Optional[NotchConfig] = None, user_settings=None):
         """Initialize state manager."""
@@ -197,6 +201,7 @@ class StateManager(QObject):
 
         from session_stats import SessionStats
         self.session_stats = SessionStats()
+        self._token_update.connect(self._apply_token_update)
 
     def handle_event(self, event_type: str, data: dict):
         """
@@ -467,44 +472,66 @@ class StateManager(QObject):
         return session
 
     def _update_token_usage(self, session: SessionState, data: dict):
-        """Update token usage from transcript data."""
-        transcript = data.get('transcript', '')
-
-        if not transcript:
+        """Read token usage from transcript JSONL file (throttled, async)."""
+        path = data.get('transcriptPath', '')
+        if not path:
             return
+        session.transcript_path = path
+        now = time.time()
+        if now - session.last_token_read_time < 5.0:
+            return
+        session.last_token_read_time = now
 
-        # Parse transcript to extract token usage
-        # The transcript is a JSON string containing conversation history
+        t = threading.Thread(
+            target=self._read_transcript,
+            args=(session.session_id, path),
+            daemon=True,
+        )
+        t.start()
+
+    def _read_transcript(self, session_id: str, path: str):
+        """Background thread: read JSONL transcript and extract last usage."""
         try:
-            transcript_data = json.loads(transcript) if isinstance(transcript, str) else transcript
-
-            # Calculate total tokens from transcript
-            total_input = 0
-            total_output = 0
-            cache_creation = 0
-            cache_read = 0
-
-            for msg in transcript_data.get('messages', []):
-                usage = msg.get('usage', {})
-                total_input += usage.get('input_tokens', 0)
-                total_output += usage.get('output_tokens', 0)
-                cache_creation += usage.get('cache_creation_input_tokens', 0)
-                cache_read += usage.get('cache_read_input_tokens', 0)
-
-            session.token_stats.input_tokens = total_input
-            session.token_stats.output_tokens = total_output
-            session.token_stats.cache_creation_tokens = cache_creation
-            session.token_stats.cache_read_tokens = cache_read
-
-            # Calculate context percentage (rough estimate)
-            # Assume 200k context window
-            context_window = 200000
-            total_context_tokens = total_input + total_output
-            session.context_tokens = total_context_tokens
-            session.context_percent = min((total_context_tokens / context_window) * 100, 100)
-
+            last_usage = None
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if obj.get('type') == 'assistant':
+                        msg = obj.get('message', {})
+                        if isinstance(msg, dict) and 'usage' in msg:
+                            last_usage = msg['usage']
+            if last_usage:
+                self._token_update.emit(
+                    session_id,
+                    last_usage.get('input_tokens', 0),
+                    last_usage.get('output_tokens', 0),
+                    last_usage.get('cache_creation_input_tokens', 0),
+                    last_usage.get('cache_read_input_tokens', 0),
+                )
         except Exception as e:
-            logger.debug(f"Error parsing transcript for token usage: {e}")
+            logger.debug(f"Failed to read transcript: {e}")
+
+    def _apply_token_update(self, session_id: str, input_t: int, output_t: int,
+                            cache_create: int, cache_read: int):
+        """Main-thread slot: apply token stats from background reader."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return
+        session.token_stats.input_tokens = input_t
+        session.token_stats.output_tokens = output_t
+        session.token_stats.cache_creation_tokens = cache_create
+        session.token_stats.cache_read_tokens = cache_read
+        context_window = 200000
+        session.context_tokens = input_t + output_t
+        session.context_percent = min((input_t / context_window) * 100, 100)
+        self.session_updated.emit(session_id)
+        self.activity_changed.emit()
 
     def get_status_dict(self) -> dict:
         """Return a serializable dict of current state for the /status endpoint."""
