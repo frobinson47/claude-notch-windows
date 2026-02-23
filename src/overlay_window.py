@@ -586,6 +586,13 @@ class SessionCard(QWidget):
 
     flash_opacity_prop = Property(float, _get_flash_opacity, _set_flash_opacity)
 
+    def mousePressEvent(self, event):
+        """Accept left-click so mouseReleaseEvent fires on this card."""
+        if event.button() == Qt.LeftButton and self.session.terminal_hwnd:
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event):
         """Click to focus the terminal window."""
         if event.button() == Qt.LeftButton and self.session.terminal_hwnd:
@@ -692,6 +699,13 @@ class MiniSessionCard(QWidget):
     def _update_dot_color(self):
         self._dot.color = self._get_dot_color()
         self._dot.update()
+
+    def mousePressEvent(self, event):
+        """Accept left-click so mouseReleaseEvent fires on this card."""
+        if event.button() == Qt.LeftButton and self.session.terminal_hwnd:
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         """Click to focus the terminal window."""

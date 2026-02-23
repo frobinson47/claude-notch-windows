@@ -65,6 +65,7 @@ class SessionState:
     context_percent: float = 0.0
     context_tokens: int = 0
     terminal_hwnd: Optional[int] = None
+    pid: Optional[int] = None
     transcript_path: str = ""
     last_token_read_time: float = 0.0
 
@@ -330,9 +331,11 @@ class StateManager(QObject):
         session.start_time = time.time()
         session.is_active = True
 
-        # Capture terminal HWND for click-to-focus
+        # Capture terminal HWND for click-to-focus (always resolve so
+        # enabling the setting later still works for existing sessions)
         pid = data.get('pid')
-        if pid and self.user_settings and self.user_settings.get('click_to_focus'):
+        if pid:
+            session.pid = pid
             try:
                 from window_focus import find_terminal_hwnd
                 session.terminal_hwnd = find_terminal_hwnd(pid)
