@@ -4,6 +4,7 @@ Non-modal, frameless dialog with live-updating preferences.
 """
 
 import logging
+import os
 import threading
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
@@ -19,6 +20,10 @@ from webhook_dispatcher import WebhookDispatcher
 logger = logging.getLogger(__name__)
 
 
+def _is_rdp_session() -> bool:
+    """Detect if running inside a Remote Desktop (RDP) session."""
+    return os.environ.get("SESSIONNAME", "").upper().startswith("RDP-")
+
 
 class SettingsDialog(QDialog):
     """Dark-themed, frameless settings dialog."""
@@ -30,11 +35,14 @@ class SettingsDialog(QDialog):
         self.user_settings = user_settings
         self._drag_pos = QPoint()
 
-        # Frameless, translucent, tool window
+        # Frameless, tool window — skip translucent background under RDP
+        # to prevent session freezes when dragging the dialog.
+        self._rdp_mode = _is_rdp_session()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        if not self._rdp_mode:
+            self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(480, 420)
         self.setMaximumSize(560, 680)
         theme = get_theme(self.user_settings.get("theme"))
@@ -659,12 +667,18 @@ class SettingsDialog(QDialog):
         painter.setRenderHint(QPainter.Antialiasing)
         theme = get_theme(self.user_settings.get("theme"))
         bg_rgb = theme["bg"]
-        bg = QColor(*bg_rgb, 240)
-        painter.setBrush(QBrush(bg))
-        painter.setPen(Qt.NoPen)
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, self.width(), self.height(), 15, 15)
-        painter.drawPath(path)
+        if self._rdp_mode:
+            # Fully opaque, no rounded corners — avoids RDP compositing issues
+            painter.setBrush(QBrush(QColor(*bg_rgb)))
+            painter.setPen(Qt.NoPen)
+            painter.drawRect(0, 0, self.width(), self.height())
+        else:
+            bg = QColor(*bg_rgb, 240)
+            painter.setBrush(QBrush(bg))
+            painter.setPen(Qt.NoPen)
+            path = QPainterPath()
+            path.addRoundedRect(0, 0, self.width(), self.height(), 15, 15)
+            painter.drawPath(path)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
